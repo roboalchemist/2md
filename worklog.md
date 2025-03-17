@@ -584,3 +584,70 @@ The script now automatically detects the type of input provided:
 - Reduced command complexity
 - Maintains backward compatibility with existing command patterns
 - Provides higher quality transcriptions by default 
+
+## 2024-03-17 14:30 PM: Added Requirements File
+
+### Project Organization: Requirements File
+Added a `requirements.txt` file to make installation easier:
+
+1. **Dependencies Included:**
+   - lightning-whisper-mlx==0.0.10 (exact version for quantization support)
+   - mlx==0.0.10 (specific version required for quantization)
+   - yt-dlp (for YouTube video download)
+   - Core dependencies: numba, numpy, torch, tqdm, etc.
+   - Exact version constraints where needed for compatibility
+
+2. **Installation Method:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Important Version Notes:**
+   - lightning-whisper-mlx is pinned to 0.0.10 for quantization support
+   - mlx is pinned to 0.0.10 for compatibility with the quantization features
+   - Other dependencies use minimum version requirements where possible
+
+4. **Environment Setup:**
+   Complete setup process:
+   ```bash
+   # Create and activate virtual environment
+   python -m venv .venv
+   source .venv/bin/activate
+   
+   # Install dependencies
+   pip install --upgrade pip
+   pip install -r requirements.txt
+   
+   # Verify installation
+   python -c "from lightning_whisper_mlx import LightningWhisperMLX; print('Installation successful')"
+   ``` 
+
+## 2024-03-17 14:45 PM: Added .gitignore File
+
+### Project Organization: .gitignore
+Added a comprehensive .gitignore file to improve repository organization:
+
+1. **Python Patterns:**
+   - Ignores common Python artifacts: `__pycache__/`, `*.pyc`, `*.pyo`, etc.
+   - Excludes build directories and package files: `build/`, `dist/`, `*.egg-info/`
+   - Ignores virtual environments: `.venv`, `.venv_new`, `env/`, etc.
+
+2. **Project-Specific Patterns:**
+   - Ignores model files and cache directories:
+     * `mlx_models/` - Prevents large model files from being committed
+     * `.cache/` - Excludes cache directories
+     * `*.npz`, `*.bin` - Model weight files
+   - Excludes media files by default: `*.srt`, `*.mp3`, `*.wav`, `*.mp4`
+   - Ignores benchmark results: `benchmark-results/`
+
+3. **Exceptions for Test Files:**
+   - Special pattern to keep test audio files in version control:
+     * `!test_audio/*.mp3`
+     * `!test_audio/*.wav`
+   - Ensures test files are available for CI/CD and new users
+
+4. **IDE and System Files:**
+   - Ignores common editor files: `.vscode/`, `.idea/`, `*.swp`
+   - Excludes OS-specific files: `.DS_Store`
+
+This ensures that only essential code is committed to the repository, keeping it clean and reducing size, while preserving test files needed for verification. 
