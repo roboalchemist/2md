@@ -11,6 +11,7 @@ Turn 2md into a comprehensive **anything-to-markdown** toolkit that runs entirel
 - **One tool per source type**: `yt2md`, `pdf2md`, `web2md`, `doc2md`, `img2md`, etc.
 - **Shared code**: Common frontmatter builder, CLI patterns (typer), and output formatting
 - **Minimal dependencies**: Prefer single-purpose libraries over kitchen-sink frameworks
+- **Hybrid approach**: Use fast non-AI extraction first, fall back to VLM only when needed
 
 ## MLX Model Stack
 
@@ -18,20 +19,74 @@ Turn 2md into a comprehensive **anything-to-markdown** toolkit that runs entirel
 |-------|---------|--------|---------|
 | **STT** | `mlx-audio[stt]` | Parakeet v3 (0.6b, 1.1b) | Audio/video transcription |
 | **HTML→MD** | `mlx-lm` | ReaderLM-v2 (`mlx-community/jinaai-ReaderLM-v2`, 4-bit, 869MB) | Clean web content extraction from raw HTML |
-| **Vision** | `mlx-vlm` | Qwen3.5-27B or Qwen2.5-VL-7B (4-bit) | Image OCR, slide understanding, diagram description |
+| **Vision/OCR** | `mlx-vlm` | Qwen3.5 (all sizes natively multimodal) | Image OCR, document understanding, diagrams, slides |
+| **Document AI** | `mlx-vlm` | SmolDocling-256M | Lightweight document extraction fallback |
 | **Text** | `mlx-lm` | (optional, for cleanup) | Transcript cleanup, summarization |
 
-### Key Model Facts
+### Qwen3.5 — The Primary VLM
 
-- **ReaderLM-v2**: 1.5B params, 512K context, MIT license. Outperforms GPT-4o on HTML→markdown (ROUGE-L 0.84). Feed raw HTML, get clean markdown. MLX 4-bit at `mlx-community/jinaai-ReaderLM-v2`.
-- **Qwen3.5-27B**: Multimodal (text+image+video, NOT audio). 262K context. MLX 4-bit needs ~27-36GB RAM. For smaller Macs, use Qwen3.5-9B (4-bit, ~10GB) or Qwen2.5-VL-7B.
+**All Qwen3.5 models are natively multimodal** (text+image+video). There is no separate "-VL" variant — vision is built into every size. This is a fundamental shift from older Qwen generations.
+
+Available on mlx-community (all 4-bit quantized):
+
+| Model | HuggingFace ID | 4-bit Size | Speed (M4 Max) | Notes |
+|-------|---------------|-----------|----------------|-------|
+| 0.8B | `mlx-community/Qwen3.5-0.8B-MLX-8bit` | <1 GB | Very fast | Any Mac |
+| 4B | `mlx-community/Qwen3.5-4B-MLX-4bit` | ~2.5 GB | Fast | MacBook Air viable |
+| 9B | `mlx-community/Qwen3.5-9B-MLX-4bit` | ~6 GB | 60+ tok/s | Outperforms prev-gen 30B |
+| **27B** | `mlx-community/Qwen3.5-27B-4bit` | **~17 GB** | ~30-40 tok/s | **Default for this machine (36GB)** |
+| 35B-A3B | `mlx-community/Qwen3.5-35B-A3B-4bit` | ~20 GB | 60-70 tok/s | MoE, only 3B active, very fast |
+
+**Default model**: Qwen3.5-27B 4-bit (~17GB). Fits comfortably on 36GB with ~19GB headroom for inference KV cache and OS. 262K token context window. 32-language OCR.
+
+### Other Key Models
+
+- **ReaderLM-v2**: 1.5B params, 512K context. Outperforms GPT-4o on HTML→markdown (ROUGE-L 0.84). Feed raw HTML, get clean markdown. MLX 4-bit at `mlx-community/jinaai-ReaderLM-v2` (869MB).
+- **SmolDocling-256M**: Ultra-lightweight document VLM from IBM+HuggingFace. 15-20ms/page. Purpose-built for document→markdown. Only ~400MB.
 - **Parakeet v3**: Already integrated. 0.6B default, 1.1B for higher accuracy. Handles chunked long audio internally.
+
+## Enhanced pdf2md — Hybrid Extraction
+
+The current pdf2md uses pymupdf4llm for text-layer extraction (instant, 0.1s/page). Enhance it with VLM fallback for scanned/image pages:
+
+```
+PDF input
+  ├─ pymupdf4llm extracts text layer (0.1s/page, no GPU)
+  │   ├─ Page has >50 chars? → Use text extraction (fast path)
+  │   └─ Page has <50 chars? → Scanned/image page (VLM path)
+  │       └─ Render page as image → Qwen3.5-27B via mlx-vlm → markdown
+  └─ Output: markdown with frontmatter
+```
+
+**Speed comparison**:
+| Method | Speed | When to Use |
+|--------|-------|-------------|
+| pymupdf4llm (current) | 0.1s/page | Born-digital PDFs with text layer |
+| Qwen3.5-9B VLM | ~2-3s/page | Scanned pages (lighter model) |
+| Qwen3.5-27B VLM | ~5-10s/page | Complex layouts, tables, equations |
+| SmolDocling-256M | 15-20ms/page | Batch processing, speed-critical |
+| MinerU (MLX backend) | 1-3s/page | Full pipeline alternative (109 languages) |
+
+**VLM prompt for document extraction**:
+```
+Extract all text from this document page as clean markdown.
+- Preserve tables as markdown tables
+- Convert equations to LaTeX ($...$ inline, $$...$$ block)
+- Use proper heading levels (#, ##, ###)
+- Preserve code blocks with language tags
+- Do NOT add text not present in the original
+Output ONLY the markdown.
+```
+
+### Alternative: MinerU
+
+MinerU (`pip install mineru`) is a complete turnkey PDF→markdown pipeline with MLX backend (`vlm-mlx-engine`). It auto-detects scanned vs text PDFs, handles tables/equations/images, and supports 109 languages. Use it if building a custom hybrid pipeline is overkill.
 
 ## New Converters
 
 ### Priority 1: web2md.py — Web Pages to Markdown
 
-**Pipeline**: URL → fetch HTML (requests/httpx) → ReaderLM-v2 (mlx-lm) → markdown with frontmatter
+**Pipeline**: URL → fetch HTML (httpx) → ReaderLM-v2 (mlx-lm) → markdown with frontmatter
 
 - Fetch page HTML with proper headers
 - Run through ReaderLM-v2 locally to extract clean article content
@@ -39,7 +94,7 @@ Turn 2md into a comprehensive **anything-to-markdown** toolkit that runs entirel
 - Fall back to `trafilatura` for metadata extraction if ReaderLM doesn't capture it
 - Support: single URL, list of URLs from file, stdin pipe
 
-**Why ReaderLM-v2 over trafilatura alone**: ReaderLM handles malformed HTML, complex layouts, nested tables, and code blocks better than rule-based extractors. It's a 1.5B model that fits in <1GB RAM at 4-bit.
+**Why ReaderLM-v2 over trafilatura alone**: ReaderLM handles malformed HTML, complex layouts, nested tables, and code blocks better than rule-based extractors. 1.5B model, <1GB at 4-bit, 512K context.
 
 ### Priority 2: doc2md.py — Office Documents to Markdown
 
@@ -63,7 +118,7 @@ Turn 2md into a comprehensive **anything-to-markdown** toolkit that runs entirel
 - Handwriting recognition
 - Generate frontmatter: source, dimensions, format, model_used, fetched_at
 - Support batch processing (directory of images)
-- Model selection: `--model qwen3.5-27b` (high quality) or `--model qwen2.5-vl-7b` (fast, lower RAM)
+- Model selection: `--model qwen3.5-27b` (default, high quality) or `--model qwen3.5-9b` (faster) or `--model smoldocling` (ultra-fast)
 
 ### Priority 4: html2md.py — Local HTML Files to Markdown
 
@@ -73,6 +128,10 @@ Turn 2md into a comprehensive **anything-to-markdown** toolkit that runs entirel
 - Same ReaderLM-v2 engine as web2md, but reads from file instead of fetching
 - Batch mode: process a directory of HTML files
 - Frontmatter from `<meta>` tags and `<title>`
+
+### Priority 5: Enhanced pdf2md — VLM Fallback
+
+Upgrade existing pdf2md.py with the hybrid approach described above. Add `--ocr` flag to force VLM on all pages, or auto-detect thin pages (already flagged in current code).
 
 ### Future Ideas (Lower Priority)
 
@@ -95,7 +154,8 @@ md_common.py
 ├── build_frontmatter(metadata: dict) -> str     # Already exists in yt2md
 ├── write_output(content: str, path: str) -> str  # Common file writer
 ├── detect_format(path: str) -> str               # File type detection
-└── setup_logging(verbose: bool) -> Logger        # Common logging setup
+├── setup_logging(verbose: bool) -> Logger        # Common logging setup
+└── load_vlm(model: str) -> tuple                 # Shared VLM loader (mlx-vlm)
 ```
 
 ### CLI Pattern
@@ -111,27 +171,28 @@ python <tool>.py <input> [OPTIONS]
 
 ### Model Management
 
-Models are downloaded on first use via HuggingFace Hub. Consider a shared `download_models.py` that pre-fetches all models:
+Models are downloaded on first use via HuggingFace Hub. Shared `download_models.py` pre-fetches all models:
 
 ```bash
 python download_models.py              # Download all default models
 python download_models.py --stt        # STT models only (Parakeet)
-python download_models.py --vlm        # Vision models only (Qwen3.5)
+python download_models.py --vlm        # Vision models only (Qwen3.5-27B)
 python download_models.py --reader     # ReaderLM-v2 only
+python download_models.py --docling    # SmolDocling-256M only
 ```
 
-## Memory Budget (Apple Silicon)
+## Memory Budget (36GB MacBook)
 
-| Model | 4-bit Size | Use Case |
-|-------|-----------|----------|
-| Parakeet v3 0.6B | ~0.5 GB | Audio transcription |
-| ReaderLM-v2 1.5B | ~0.9 GB | HTML→markdown |
-| Qwen2.5-VL-7B | ~4 GB | Image understanding (default) |
-| Qwen3.5-27B | ~14 GB | Image understanding (high quality) |
+| Model | 4-bit Size | Use Case | Loaded When |
+|-------|-----------|----------|-------------|
+| Parakeet v3 0.6B | ~0.5 GB | Audio transcription | yt2md |
+| ReaderLM-v2 1.5B | ~0.9 GB | HTML→markdown | web2md, html2md |
+| SmolDocling 256M | ~0.4 GB | Fast document OCR | pdf2md (batch), img2md (fast) |
+| **Qwen3.5-27B** | **~17 GB** | **Image/document understanding** | **img2md, pdf2md (OCR)** |
 
-- **16GB Mac**: Can run Parakeet + ReaderLM-v2 + Qwen2.5-VL-7B comfortably
-- **32GB+ Mac**: Can run everything including Qwen3.5-27B
-- Models are loaded on-demand, not all at once
+- Models are loaded on-demand, one at a time (not all at once)
+- Qwen3.5-27B 4-bit (17GB) fits on 36GB with ~19GB headroom for KV cache + OS
+- For 128GB machines: can run Qwen3.5-27B 8-bit or multiple models simultaneously
 
 ## Non-Goals
 
