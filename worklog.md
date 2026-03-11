@@ -94,3 +94,21 @@ Newest entries at top. Old lightning-whisper-mlx worklog archived to worklog-arc
 - Phase 6 (pdf2md VLM fallback) worker running
 - Phase 8 (polish) queued after Phase 6
 .
+
+## 2026-03-10 ALL PHASES COMPLETE: 204 tests, 8 tools
+
+### Final state
+- Phase 1: md_common.py — shared utilities extracted ✅
+- Phase 2: web2md.py — URL → markdown via ReaderLM-v2 ✅
+- Phase 3: doc2md.py — DOCX/PPTX/XLSX/EPUB → markdown via markitdown ✅
+- Phase 4: img2md.py — images → markdown via Qwen3.5 VLM ✅
+- Phase 5: html2md.py — local HTML → markdown via ReaderLM-v2 ✅
+- Phase 6: pdf2md.py — enhanced with --ocr/--force-ocr VLM fallback ✅
+- Phase 7: rst2md.py — RST → markdown via pypandoc/docutils ✅
+- Phase 8: README.md refreshed, requirements.txt complete ✅
+
+### Results
+- 204 tests passing
+- All 8 --help commands exit 0
+- All tools produce YAML frontmatter + markdown
+- All AI inference local via MLX, no cloud APIs

@@ -4,7 +4,7 @@
 
 **IMPORTANT — Research-first approach**: Before implementing any tool, dispatch internet-researcher agents to verify library versions, API changes, and MLX model availability.
 
-## Phase 1 — Foundation (md_common.py + infrastructure) ⬜ NOT STARTED
+## Phase 1 — Foundation (md_common.py + infrastructure) ✅ DONE
 
 Extract shared code from yt2md.py into md_common.py so all tools can import from it. Update existing tools. Rewrite download_models.py with typer.
 
@@ -19,7 +19,7 @@ Convert from argparse to typer. Add flags: `--stt`, `--vlm`, `--reader`, `--docl
 
 **Success**: All 25 existing tests pass. `from md_common import build_frontmatter` works. `python download_models.py --help` shows typer-style help.
 
-## Phase 2 — web2md.py (ReaderLM-v2) ⬜ NOT STARTED
+## Phase 2 — web2md.py (ReaderLM-v2) ✅ DONE
 
 Build web page → markdown converter using ReaderLM-v2 locally via mlx-lm.
 
@@ -34,7 +34,7 @@ Unit tests mocking the model and httpx calls. At least 8 tests covering: URL fet
 
 **Success**: `python web2md.py https://example.com` produces clean markdown with frontmatter. All tests pass.
 
-## Phase 3 — doc2md.py (markitdown) ⬜ NOT STARTED
+## Phase 3 — doc2md.py (markitdown) ✅ DONE
 
 Build office document → markdown converter using Microsoft's markitdown library.
 
@@ -49,7 +49,7 @@ Unit tests with sample documents (create minimal test files). At least 8 tests.
 
 **Success**: `python doc2md.py document.docx` produces markdown with frontmatter. All tests pass.
 
-## Phase 4 — img2md.py (Qwen3.5 VLM) ⬜ NOT STARTED
+## Phase 4 — img2md.py (Qwen3.5 VLM) ✅ DONE
 
 Build image → markdown converter using Qwen3.5 via mlx-vlm.
 
@@ -67,7 +67,7 @@ Unit tests mocking mlx-vlm. At least 8 tests.
 
 **Success**: `python img2md.py photo.jpg` produces OCR markdown with frontmatter. All tests pass.
 
-## Phase 5 — html2md.py (local HTML files) ⬜ NOT STARTED
+## Phase 5 — html2md.py (local HTML files) ✅ DONE
 
 Reuse ReaderLM-v2 engine from web2md for local HTML files.
 
@@ -79,7 +79,7 @@ At least 8 tests.
 
 **Success**: `python html2md.py page.html` produces markdown with frontmatter. All tests pass.
 
-## Phase 6 — Enhanced pdf2md (VLM fallback for scanned pages) ⬜ NOT STARTED
+## Phase 6 — Enhanced pdf2md (VLM fallback for scanned pages) ✅ DONE
 
 Depends on Phase 4 (img2md VLM patterns).
 
@@ -94,7 +94,7 @@ Text path for born-digital, VLM path for scanned. At least 5 new tests.
 
 **Success**: `python pdf2md.py scanned.pdf --ocr` produces markdown from image-only pages.
 
-## Phase 7 — rst2md.py (reStructuredText to Markdown) ⬜ NOT STARTED
+## Phase 7 — rst2md.py (reStructuredText to Markdown) ✅ DONE
 
 Convert `.rst` files (Sphinx docs, Python package READMEs, documentation) to clean markdown.
 
@@ -121,7 +121,7 @@ At least 8 unit tests. Create minimal RST strings in-memory for testing (no real
 
 **Success**: `python rst2md.py README.rst` produces markdown with frontmatter. All tests pass.
 
-## Phase 8 — Polish & Keep Going ⬜ NOT STARTED
+## Phase 8 — Polish & Keep Going ✅ DONE
 
 - Update download_models.py for all new models
 - Update requirements.txt with all new dependencies
