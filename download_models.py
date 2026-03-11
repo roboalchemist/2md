@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Download mlx-audio models (Parakeet v3, Whisper variants)
+Download mlx-audio Parakeet models
 
 This script pre-downloads mlx-audio models from HuggingFace so they are cached
 locally for faster startup in subsequent runs.
@@ -17,7 +17,7 @@ import time
 import logging
 import argparse
 from mlx_audio.stt import load
-from yt2srt import resolve_model, MODEL_ALIASES, SUPPORTED_MODELS
+from yt2md import resolve_model, MODEL_ALIASES, SUPPORTED_MODELS
 
 # Configure logging
 logging.basicConfig(
@@ -32,7 +32,6 @@ DEFAULT_MODELS = [
     "mlx-community/parakeet-tdt-0.6b-v2",
     "mlx-community/parakeet-tdt-1.1b",
     "mlx-community/parakeet-ctc-0.6b",
-    "mlx-community/whisper-large-v3-turbo-asr-fp16",
 ]
 
 
@@ -58,7 +57,7 @@ def download_model(model_name: str):
 def main():
     """Main function."""
     parser = argparse.ArgumentParser(
-        description="Download mlx-audio models (Parakeet v3 / Whisper)",
+        description="Download mlx-audio Parakeet models",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(

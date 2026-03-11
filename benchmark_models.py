@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Benchmark script for mlx-audio models (Parakeet v3 / Whisper).
+Benchmark script for mlx-audio Parakeet models.
 Tests all specified models and reports transcription speed.
 Each model gets a warmup run before its timed run.
 """
@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from yt2srt import resolve_model, MODEL_ALIASES
+from yt2md import resolve_model, MODEL_ALIASES
 
 # Models to benchmark (full HuggingFace IDs or aliases)
 MODELS = [
@@ -20,7 +20,6 @@ MODELS = [
     "mlx-community/parakeet-tdt-0.6b-v2",
     "mlx-community/parakeet-tdt-1.1b",
     "mlx-community/parakeet-ctc-0.6b",
-    "mlx-community/whisper-large-v3-turbo-asr-fp16",
 ]
 
 
@@ -60,7 +59,7 @@ def run_transcription(
 
     # Build command
     cmd = [
-        "python", "yt2srt.py",
+        "python", "yt2md.py",
         input_file,
         "--model", model,
         "-o", output_dir,

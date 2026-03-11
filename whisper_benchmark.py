@@ -2,8 +2,8 @@
 """
 mlx-audio Benchmark
 
-This script benchmarks the performance of different mlx-audio models
-(Parakeet v3 and Whisper) for audio transcription.
+This script benchmarks the performance of different mlx-audio Parakeet
+models for audio transcription.
 
 Usage:
     python whisper_benchmark.py
@@ -20,7 +20,7 @@ import argparse
 import subprocess
 from tabulate import tabulate
 from mlx_audio.stt import load
-from yt2srt import resolve_model, MODEL_ALIASES
+from yt2md import resolve_model, MODEL_ALIASES
 
 # Configure logging
 logging.basicConfig(
@@ -35,7 +35,6 @@ AVAILABLE_MODELS = [
     "mlx-community/parakeet-tdt-0.6b-v2",
     "mlx-community/parakeet-tdt-1.1b",
     "mlx-community/parakeet-ctc-0.6b",
-    "mlx-community/whisper-large-v3-turbo-asr-fp16",
 ] + list(MODEL_ALIASES.keys())
 
 
@@ -215,7 +214,7 @@ def display_results(results):
 
 def main():
     """Main function."""
-    parser = argparse.ArgumentParser(description="mlx-audio Benchmark (Parakeet v3 / Whisper)")
+    parser = argparse.ArgumentParser(description="mlx-audio Benchmark (Parakeet)")
     parser.add_argument("--audio", default="test_audio/yt_video.mp3", help="Path to audio file")
     parser.add_argument(
         "--models",

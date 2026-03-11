@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Model Test for mlx-audio (Parakeet v3 / Whisper)
+Model Test for mlx-audio (Parakeet)
 
 With mlx-audio, quantization is baked into the model weights on HuggingFace —
 there is no runtime quantization parameter. This script simply runs a quick
@@ -18,7 +18,7 @@ import time
 import logging
 import argparse
 from mlx_audio.stt import load
-from yt2srt import resolve_model, MODEL_ALIASES
+from yt2md import resolve_model, MODEL_ALIASES
 
 # Configure logging
 logging.basicConfig(

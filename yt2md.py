@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 # Constants
 DEFAULT_MODEL = "mlx-community/parakeet-tdt-0.6b-v3"
-AUDIO_SAMPLE_RATE = 16000  # 16kHz as required by Parakeet/Whisper
+AUDIO_SAMPLE_RATE = 16000  # 16kHz as required by Parakeet
 MODELS_DIR = "mlx_models"  # Directory for cached models
 
 # Short alias -> full HuggingFace model ID
@@ -57,7 +57,6 @@ MODEL_ALIASES = {
     "parakeet-v2": "mlx-community/parakeet-tdt-0.6b-v2",
     "parakeet-1.1b": "mlx-community/parakeet-tdt-1.1b",
     "parakeet-ctc": "mlx-community/parakeet-ctc-0.6b",
-    "whisper-turbo": "mlx-community/whisper-large-v3-turbo-asr-fp16",
 }
 
 SUPPORTED_MODELS = [
@@ -65,7 +64,6 @@ SUPPORTED_MODELS = [
     "mlx-community/parakeet-tdt-0.6b-v2",
     "mlx-community/parakeet-tdt-1.1b",
     "mlx-community/parakeet-ctc-0.6b",
-    "mlx-community/whisper-large-v3-turbo-asr-fp16",
 ] + list(MODEL_ALIASES.keys())
 
 
@@ -238,7 +236,7 @@ def extract_youtube_metadata(info: Dict) -> Dict:
 
 def convert_audio_for_whisper(input_file: str, output_dir: Optional[str] = None) -> str:
     """
-    Convert audio file to the format required by Parakeet/Whisper (16kHz, mono, WAV).
+    Convert audio file to the format required by Parakeet (16kHz, mono, WAV).
 
     Args:
         input_file: Path to the input audio file
@@ -492,7 +490,7 @@ def transcribe(
     metadata: Optional[Dict] = None,
 ) -> str:
     """
-    Transcribe audio file using mlx-audio (Parakeet/Whisper).
+    Transcribe audio file using mlx-audio (Parakeet).
 
     Args:
         audio_file: Path to the audio file
@@ -668,7 +666,7 @@ _model_help = (
 )
 
 app = typer.Typer(
-    help="Transcribe YouTube videos, audio, or video files to markdown, SRT, or plain text using mlx-audio (Parakeet v3).",
+    help="Transcribe YouTube videos, audio, or video files to markdown, SRT, or plain text using mlx-audio (Parakeet).",
     add_completion=False,
     rich_markup_mode="rich",
     no_args_is_help=True,

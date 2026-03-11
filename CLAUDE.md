@@ -10,23 +10,21 @@ A toolkit for converting media (YouTube videos, audio files, PDFs) to markdown w
 2md/
 ├── yt2md.py               # YouTube/audio/video → markdown/SRT/text (typer CLI)
 ├── pdf2md.py              # PDF → markdown/text (typer CLI, imports build_frontmatter from yt2md)
-├── whisper_benchmark.py   # Interactive benchmark (STALE: imports from yt2srt)
-├── benchmark_models.py    # Automated benchmark (STALE: imports from yt2srt)
-├── download_models.py     # Pre-download models (STALE: imports from yt2srt)
-├── quant_test.py          # Quick smoke test (STALE: uses old lightning-whisper-mlx)
-├── test_quant.py          # Old quantization test (STALE: uses lightning-whisper-mlx)
+├── whisper_benchmark.py   # Interactive benchmark: compare Parakeet models
+├── benchmark_models.py    # Automated benchmark: warmup + timed runs
+├── download_models.py     # Pre-download mlx-audio models from HuggingFace
+├── quant_test.py          # Quick model smoke test
 ├── transcription_cleanup_prompt.txt  # LLM prompt template for cleaning raw transcripts
 ├── requirements.txt       # Python dependencies
 ├── test_yt2md.py          # 15 unit tests for yt2md
 ├── test_pdf2md.py         # 10 unit tests for pdf2md
-├── test_benchmark.py      # 3 tests for whisper_benchmark (STALE: depends on yt2srt)
+├── test_benchmark.py      # 3 integration tests for whisper_benchmark (requires mlx-audio)
 ├── test_audio/            # Test audio files (mp3/wav, tracked via .gitignore exceptions)
 ├── benchmark-results/     # Generated benchmark reports (gitignored)
 ├── worklog.md             # Development history (mostly from lightning-whisper-mlx era)
 └── .cursor/mcp.json       # Cursor MCP config
 ```
 
-**Stale files**: `whisper_benchmark.py`, `benchmark_models.py`, `download_models.py`, `quant_test.py`, and `test_quant.py` all import from `yt2srt` (the old module name) or `lightning_whisper_mlx` (the old library). They will fail if run.
 
 ## Key Libraries & Dependencies
 
@@ -84,7 +82,7 @@ Default model: `mlx-community/parakeet-tdt-0.6b-v3`
 | `parakeet-v2` | `mlx-community/parakeet-tdt-0.6b-v2` |
 | `parakeet-1.1b` | `mlx-community/parakeet-tdt-1.1b` |
 | `parakeet-ctc` | `mlx-community/parakeet-ctc-0.6b` |
-| `whisper-turbo` | `mlx-community/whisper-large-v3-turbo-asr-fp16` |
+
 
 ### Frontmatter
 
@@ -102,7 +100,7 @@ Both tools generate YAML frontmatter using a shared `build_frontmatter()` that m
 - **Run individually**: `python -m pytest test_yt2md.py -v` or `python -m pytest test_pdf2md.py -v`
 - **Test patterns**: FakeAlignedSentence objects mock mlx-audio output; dict-based test data for backward compat
 - **No integration tests**: Tests cover pure functions only (formatting, parsing, frontmatter), not actual transcription or download
-- **Benchmark tests** (`test_benchmark.py`): Currently broken — imports from `yt2srt`
+- **Benchmark tests** (`test_benchmark.py`): 3 integration tests requiring mlx-audio installed
 
 ## CLI Reference
 
@@ -145,4 +143,4 @@ pip install -r requirements.txt
 
 ## Project History
 
-Originally built as `yt2srt` on `lightning-whisper-mlx`. Migrated to `yt2md` on `mlx-audio` with Parakeet v3, then rewritten from argparse to typer. Several auxiliary scripts (`whisper_benchmark.py`, `benchmark_models.py`, `download_models.py`, `quant_test.py`) still reference the old `yt2srt` module name and need updating.
+Originally built as `yt2srt` on `lightning-whisper-mlx`. Migrated to `yt2md` on `mlx-audio` with Parakeet, then rewritten from argparse to typer. Only Parakeet models are supported (Whisper models removed).

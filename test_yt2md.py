@@ -141,8 +141,8 @@ class TestYt2Srt(unittest.TestCase):
             "mlx-community/parakeet-tdt-0.6b-v2"
         )
         self.assertEqual(
-            resolve_model("whisper-turbo"),
-            "mlx-community/whisper-large-v3-turbo-asr-fp16"
+            resolve_model("parakeet-ctc"),
+            "mlx-community/parakeet-ctc-0.6b"
         )
 
     def test_resolve_model_passthrough(self):
