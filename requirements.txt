@@ -1,5 +1,6 @@
 # Core dependencies
 mlx-audio[stt]>=0.4.0
+pymupdf4llm>=0.2.0
 typer>=0.9.0
 yt-dlp>=2023.11.14
 numba>=0.61.0

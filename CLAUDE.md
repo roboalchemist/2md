@@ -1,111 +1,86 @@
-# 2md - Audio/Video to Markdown Transcription Toolkit
+# 2md - Media to Markdown Toolkit
 
 ## Overview
 
-A toolkit for transcribing audio/video (including YouTube videos) to markdown, SRT, or plain text using [mlx-audio](https://github.com/Blaizzy/mlx-audio) with Parakeet v3 on Apple Silicon. Includes benchmarking tools for comparing model performance.
+A toolkit for converting media (YouTube videos, audio files, PDFs) to markdown with YAML frontmatter. Built on [mlx-audio](https://github.com/Blaizzy/mlx-audio) (Parakeet v3) for transcription and [pymupdf4llm](https://github.com/pymupdf/RAG) for PDF extraction. Optimized for Apple Silicon.
 
 ## Project Structure
 
 ```
 2md/
-├── yt2md.py               # Main tool: YouTube/local audio/video → markdown/SRT/text
-├── whisper_benchmark.py   # Interactive benchmark: compare models with tabulate output
-├── benchmark_models.py    # Automated benchmark: warmup + timed runs, markdown report
+├── yt2md.py               # YouTube/audio/video → markdown/SRT/text
+├── pdf2md.py              # PDF → markdown/text (page-delineated)
+├── whisper_benchmark.py   # Interactive benchmark: compare STT models
+├── benchmark_models.py    # Automated benchmark: warmup + timed runs
 ├── download_models.py     # Pre-download mlx-audio models from HuggingFace
 ├── quant_test.py          # Quick model smoke test
-├── transcription_cleanup_prompt.txt  # LLM prompt template for cleaning raw transcripts
+├── transcription_cleanup_prompt.txt  # LLM prompt for cleaning raw transcripts
 ├── requirements.txt       # Dependencies
-├── test_yt2md.py          # Unit tests (extract_video_id, formatters, resolve_model)
+├── test_yt2md.py          # Unit tests for yt2md
+├── test_pdf2md.py         # Unit tests for pdf2md
 ├── test_benchmark.py      # Tests for whisper_benchmark.py
 ├── test_audio/            # Test audio files (mp3/wav)
 ├── benchmark-results/     # Generated benchmark reports
-├── worklog.md             # Development history and findings
-└── .cursor/mcp.json       # Cursor MCP config (project-name-mcp)
+├── worklog.md             # Development history
+└── .cursor/mcp.json       # Cursor MCP config
 ```
 
 ## Key Libraries & Dependencies
 
 | Library | Version | Purpose |
 |---------|---------|---------|
-| `mlx-audio[stt]` | >=0.4.0 | Parakeet/Whisper inference optimized for Apple Silicon (MLX) |
+| `mlx-audio[stt]` | >=0.4.0 | Parakeet/Whisper STT on Apple Silicon (MLX) |
+| `pymupdf4llm` | >=0.2.0 | PDF text extraction to markdown |
+| `typer` | >=0.9.0 | CLI framework |
 | `yt-dlp` | >=2023.11.14 | YouTube audio download |
-| `tabulate` | (any) | Benchmark result formatting |
 | `ffmpeg`/`ffprobe` | system | Audio conversion and duration detection |
 
-### llm-code-docs availability
-- `mlx-lm`, `mlx-swift`: docs exist at `~/github/llm-code-docs/docs/github-scraped/`
-- `mlx-audio`, `yt-dlp`: NOT in llm-code-docs
+## Tools
 
-## Architecture
-
-### yt2md.py (main tool)
+### yt2md.py — Audio/Video to Markdown
 - **Input auto-detection**: YouTube URL, YouTube ID (11 chars), or local file path
-- **Pipeline**: Download (yt-dlp) → Convert to 16kHz mono WAV (ffmpeg) → Transcribe (mlx-audio) → output (md/srt/txt)
-- **Default output**: Markdown (`--format md`). Also supports `srt` and `txt`.
-- **Long audio**: mlx-audio handles chunking internally via `chunk_duration` parameter (default 30s). No manual splitting needed.
-- **Model resolution**: Accepts full HuggingFace IDs (`mlx-community/parakeet-tdt-0.6b-v3`) or short aliases (`parakeet-v3`). See `MODEL_ALIASES` dict.
-- **Quantization**: Baked into HuggingFace model weights — no runtime parameter. Choose a different model ID for a quantized variant.
-- **AlignedResult**: `model.generate()` returns an `AlignedResult` with `.text` (str) and `.sentences` (list of `AlignedSentence` with `.start`, `.end`, `.text`, `.tokens`).
+- **Pipeline**: Download (yt-dlp) → Convert to 16kHz mono WAV (ffmpeg) → Transcribe (mlx-audio) → output
+- **Formats**: `md` (default, with YAML frontmatter + timestamps), `srt`, `txt`
+- **YouTube frontmatter**: title, channel, upload_date, duration, tags, chapters, view/like/comment counts, thumbnail, description, fetched_at
+- **Long audio**: mlx-audio handles chunking internally via `--chunk-duration` (default 30s)
+- **Model aliases**: `parakeet-v3`, `parakeet-v2`, `parakeet-1.1b`, `parakeet-ctc`, `whisper-turbo` → full HuggingFace IDs
 
-### Output Formats
-- **md** (default): `# Title` heading + `**[MM:SS]** Sentence text.` paragraphs
-- **srt**: Standard SRT subtitle format with `HH:MM:SS,mmm` timestamps
-- **txt**: Plain text, no timestamps, double-newline separated paragraphs
-
-### Available Models
-
-| Alias | HuggingFace ID | Notes |
-|-------|----------------|-------|
-| `parakeet-v3` | `mlx-community/parakeet-tdt-0.6b-v3` | Default. 25 EU languages + RU/UK |
-| `parakeet-v2` | `mlx-community/parakeet-tdt-0.6b-v2` | English only |
-| `parakeet-1.1b` | `mlx-community/parakeet-tdt-1.1b` | Larger, more accurate |
-| `parakeet-ctc` | `mlx-community/parakeet-ctc-0.6b` | CTC variant |
-| `whisper-turbo` | `mlx-community/whisper-large-v3-turbo-asr-fp16` | Whisper fallback |
-
-### Benchmark scripts
-- `whisper_benchmark.py`: Interactive CLI with `--simple` mode and `--models` selection. Uses tabulate for display.
-- `benchmark_models.py`: Automated full benchmark. Warmup run per model, then timed run. Outputs markdown report to `benchmark-results/`.
+### pdf2md.py — PDF to Markdown
+- **Extraction**: pymupdf4llm text-layer extraction (instant, no VLM needed)
+- **Page filtering**: `--pages 1-10,15,20-25` passed directly to pymupdf4llm (no full-doc scan)
+- **Formats**: `md` (default, with YAML frontmatter + `## Page N` headings), `txt`
+- **PDF frontmatter**: title, author, subject, keywords, creator, producer, created, modified, format, pages, source, fetched_at
+- **Thin page detection**: Pages with <50 chars flagged as image-only (future VLM support)
+- **Shared code**: Reuses `build_frontmatter()` from yt2md
 
 ## Testing
 
-- **Framework**: `unittest` (stdlib)
-- **Unit tests**: `python test_yt2md.py` — tests `extract_video_id`, `segments_to_srt`, `segments_to_markdown`, `segments_to_text`, `resolve_model` (no network/model required)
-- **Benchmark tests**: `python test_benchmark.py` — requires mlx-audio installed and test audio files
+- **Framework**: `unittest` (stdlib), run via `pytest`
+- **yt2md tests** (15): `python -m pytest test_yt2md.py`
+- **pdf2md tests** (10): `python -m pytest test_pdf2md.py`
+- **All tests**: `python -m pytest test_yt2md.py test_pdf2md.py test_benchmark.py`
 
 ## Installation
 
 ```bash
-# System deps
 brew install ffmpeg
-
-# Python deps
 pip install -r requirements.txt
 
-# Optional: pre-download models
+# Optional: pre-download STT models
 python download_models.py
 ```
-
-Models are cached by the HuggingFace hub in `~/.cache/huggingface/`.
 
 ## Usage
 
 ```bash
-# Transcribe YouTube video to markdown (default)
-python yt2md.py https://www.youtube.com/watch?v=VIDEO_ID
+# --- yt2md ---
+python yt2md.py jNQXAC9IVRw                          # YouTube video → markdown
+python yt2md.py my_video.mp4 -m parakeet-1.1b         # local file, bigger model
+python yt2md.py podcast.mp3 -f srt                     # SRT subtitles
+python yt2md.py lecture.mp4 -f txt -c 60               # plain text, 60s chunks
 
-# Transcribe local file
-python yt2md.py my_video.mp4 --model parakeet-1.1b
-
-# Output SRT instead
-python yt2md.py podcast.mp3 --format srt
-
-# Plain text
-python yt2md.py lecture.mp4 --format txt
-
-# Control chunk duration for long audio (default 30s)
-python yt2md.py long_lecture.mp4 --chunk-duration 60
-
-# Benchmark
-python whisper_benchmark.py --audio test_audio/yt_video.mp3 --models parakeet-v3 parakeet-1.1b
-python benchmark_models.py  # full automated benchmark
+# --- pdf2md ---
+python pdf2md.py document.pdf                          # full PDF → markdown
+python pdf2md.py slides.pdf -p 1-10 -o ~/notes/        # first 10 pages
+python pdf2md.py report.pdf -f txt                      # plain text
 ```
