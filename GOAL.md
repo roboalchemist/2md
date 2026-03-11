@@ -121,7 +121,7 @@ At least 8 unit tests. Create minimal RST strings in-memory for testing (no real
 
 **Success**: `python rst2md.py README.rst` produces markdown with frontmatter. All tests pass.
 
-## Phase 9 — Complete Live Testing (unit + integration) 🔄 IN PROGRESS
+## Phase 9 — Complete Live Testing (unit + integration) ✅ DONE
 
 Current tests are unit-only with mocked dependencies. Nothing actually runs a model, fetches a URL, or reads a real file. This phase adds two layers:
 
@@ -182,7 +182,7 @@ All tests incl. integration: `pytest test_*.py test_integration.py`
 - `pytest test/` passes with real fixtures (no mocks, no models)
 - `pytest test_integration.py -m integration -v` runs and either passes or skips (never errors) based on model availability
 
-### 9D — Real inference integration tests (NO skipping) ⬜ NOT STARTED
+### 9D — Real inference integration tests (NO skipping) ✅ DONE
 
 9A–9C done. Gap remaining: integration tests skip when models aren't cached. This sub-goal makes inference tests actually run end-to-end on this machine.
 

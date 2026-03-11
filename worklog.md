@@ -112,3 +112,23 @@ Newest entries at top. Old lightning-whisper-mlx worklog archived to worklog-arc
 - All 8 --help commands exit 0
 - All tools produce YAML frontmatter + markdown
 - All AI inference local via MLX, no cloud APIs
+
+## 2026-03-10 Phase 9 COMPLETE: live fixtures + inference tests
+
+### What was done
+- 9A-9C: test/fixtures/ (7 real files), test/test_fixtures.py (43 tests), test_integration.py (auto-skip), pytest.ini markers
+- 9D: test/test_inference.py — 6 slow tests that run REAL inference, no skipping:
+  - ReaderLM-v2 on sample.html → markdown ✅
+  - ReaderLM-v2 html2md full pipeline ✅
+  - ReaderLM-v2 on real https://example.com fetch ✅
+  - Qwen2.5-VL-3B OCR on sample.jpg (reads "Hello World") ✅
+  - Qwen2.5-VL-3B OCR on PDF page via render_page_as_image ✅
+  - Parakeet on test_voice.mp3 transcription ✅
+- Fixed test_img2md.py: mlx-vlm now installed, updated mock to patch module attrs
+
+### Results
+- 256/256 unit+fixture tests pass (1 skip: epub fixture)
+- 6/6 inference tests pass (43s total — models already cached)
+
+### Final state
+- All GOAL.md phases complete ✅
