@@ -34,8 +34,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Reuse frontmatter builder from yt2md
-from yt2md import build_frontmatter
+from md_common import build_frontmatter
 
 # Minimum chars on a page before flagging as image-heavy
 THIN_PAGE_THRESHOLD = 50

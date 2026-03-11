@@ -39,6 +39,8 @@ import logging
 import typer
 from typing_extensions import Annotated
 
+from md_common import build_frontmatter  # noqa: F401 — re-exported for backward compat
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -343,82 +345,6 @@ def segments_to_srt(sentences: List) -> str:
             srt_lines.append("")
 
     return "\n".join(srt_lines)
-
-
-def build_frontmatter(metadata: Dict) -> str:
-    """
-    Build YAML frontmatter string from metadata dict.
-
-    Handles scalars, lists, and nested dicts (chapters).
-    Uses manual formatting to avoid a PyYAML dependency.
-
-    Args:
-        metadata: Dict of metadata fields
-
-    Returns:
-        YAML frontmatter string including --- delimiters
-    """
-    def yaml_scalar(v) -> str:
-        if isinstance(v, bool):
-            return "true" if v else "false"
-        if isinstance(v, int):
-            return str(v)
-        if isinstance(v, float):
-            return str(v)
-        s = str(v)
-        # Quote if contains special chars or looks like a number/bool
-        if any(c in s for c in ':#{}[]&*?|->!%@`"\',\n') or s in ('true', 'false', 'null', 'yes', 'no'):
-            escaped = s.replace('\\', '\\\\').replace('"', '\\"')
-            return f'"{escaped}"'
-        return s
-
-    lines = ["---"]
-
-    # Ordered keys for clean output
-    key_order = [
-        'title', 'video_id', 'url', 'channel', 'channel_url', 'uploader',
-        'upload_date', 'duration', 'duration_human', 'language', 'location',
-        'availability', 'live_status', 'view_count', 'like_count',
-        'comment_count', 'channel_follower_count', 'thumbnail',
-        'categories', 'tags', 'subtitles', 'auto_captions',
-        'chapters', 'description', 'fetched_at',
-    ]
-    # Include any keys not in the order list at the end
-    all_keys = key_order + [k for k in metadata if k not in key_order]
-
-    for key in all_keys:
-        if key not in metadata:
-            continue
-        val = metadata[key]
-
-        if val is None or val == [] or val == '':
-            continue
-
-        if key == 'description':
-            # Multi-line string
-            escaped = str(val).replace('\\', '\\\\')
-            lines.append(f'{key}: |')
-            for desc_line in escaped.split('\n'):
-                lines.append(f'  {desc_line}')
-        elif key == 'chapters' and isinstance(val, list) and val:
-            lines.append(f'{key}:')
-            for ch in val:
-                lines.append(f'  - time: {yaml_scalar(ch["time"])}')
-                lines.append(f'    title: {yaml_scalar(ch["title"])}')
-        elif isinstance(val, list):
-            if all(isinstance(item, str) for item in val) and len(val) <= 10:
-                # Inline list for short string lists
-                items = ", ".join(yaml_scalar(item) for item in val)
-                lines.append(f'{key}: [{items}]')
-            else:
-                lines.append(f'{key}:')
-                for item in val:
-                    lines.append(f'  - {yaml_scalar(item)}')
-        else:
-            lines.append(f'{key}: {yaml_scalar(val)}')
-
-    lines.append("---")
-    return "\n".join(lines)
 
 
 def segments_to_markdown(sentences: List, title: Optional[str] = None,
