@@ -678,7 +678,7 @@ app = typer.Typer(
 @app.command()
 def main(
     input: Annotated[str, typer.Argument(
-        help="YouTube URL, YouTube video ID, or path to a local audio/video file.",
+        help="YouTube URL, video ID (11 chars), or local file path. [dim]Tip: use the video ID or quote URLs to avoid shell glob issues with ? and &.[/dim]",
     )],
     model: Annotated[str, typer.Option(
         "--model", "-m",
