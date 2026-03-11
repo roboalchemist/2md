@@ -121,7 +121,7 @@ At least 8 unit tests. Create minimal RST strings in-memory for testing (no real
 
 **Success**: `python rst2md.py README.rst` produces markdown with frontmatter. All tests pass.
 
-## Phase 9 — Complete Live Testing (unit + integration) ⬜ NOT STARTED
+## Phase 9 — Complete Live Testing (unit + integration) 🔄 IN PROGRESS
 
 Current tests are unit-only with mocked dependencies. Nothing actually runs a model, fetches a URL, or reads a real file. This phase adds two layers:
 
@@ -181,6 +181,35 @@ All tests incl. integration: `pytest test_*.py test_integration.py`
 - `pytest test_*.py -q` still passes (204+)
 - `pytest test/` passes with real fixtures (no mocks, no models)
 - `pytest test_integration.py -m integration -v` runs and either passes or skips (never errors) based on model availability
+
+### 9D — Real inference integration tests (NO skipping) ⬜ NOT STARTED
+
+9A–9C done. Gap remaining: integration tests skip when models aren't cached. This sub-goal makes inference tests actually run end-to-end on this machine.
+
+**Strategy**: Download the smallest viable model for each inference path, run real inference, assert meaningful output. These are slow tests — mark `@pytest.mark.slow` so normal CI can skip them, but they MUST pass (not skip) when run explicitly.
+
+Models to use (smallest that actually work):
+- **STT** (`yt2md`): `mlx-community/parakeet-tdt-0.6b-v3` (~600MB, already the default)
+- **HTML→MD** (`web2md`, `html2md`): `mlx-community/ReaderLM-v2` (~869MB, 4-bit)
+- **VLM/OCR** (`img2md`, `pdf2md --ocr`): `mlx-community/Qwen2.5-VL-3B-Instruct-4bit` (~2GB, smallest Qwen VL that works with mlx-vlm)
+
+**What to build**:
+1. `test/test_inference.py` — slow inference tests using `@pytest.mark.slow`. Each test:
+   - Downloads the model if not cached (using `mlx_lm.load()` or `mlx_vlm.load()` — they auto-download on first use)
+   - Runs real inference on the corresponding fixture file
+   - Asserts output is non-empty, contains recognizable content from the fixture
+   - Must PASS, not skip
+
+2. Tests to include:
+   - `test_readerlm_html_to_markdown` — run real ReaderLM-v2 on `sample.html`, assert output contains "heading" or "paragraph" content
+   - `test_readerlm_web_fetch_and_convert` — fetch a real stable URL (e.g. `https://example.com`), run ReaderLM-v2, assert non-empty markdown
+   - `test_vlm_image_ocr` — run Qwen2.5-VL-3B on `sample.jpg` (has "Hello World" text), assert "Hello" or "World" appears in output
+   - `test_vlm_pdf_scanned_page` — render `sample.pdf` page as image, run VLM OCR, assert content recognized
+   - `test_parakeet_transcription` — transcribe `test_audio/test_voice.mp3` with Parakeet, assert non-empty transcript
+
+3. Run with: `pytest test/test_inference.py -m slow -v -s` (the `-s` shows model loading progress)
+
+**Success**: `pytest test/test_inference.py -m slow -v` passes with 0 failures, 0 skips on this machine (36GB Apple Silicon).
 
 ## Phase 8 — Polish & Keep Going ✅ DONE
 
