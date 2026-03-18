@@ -213,44 +213,48 @@ Models to use (smallest that actually work):
 
 ## Phase 10 — Speaker Diarization for yt2md.py ⬜ NOT STARTED
 
-Add `--diarize` flag to yt2md.py that identifies who is speaking. Uses an MLX-native pipeline (~32MB total):
+Add `--diarize` flag to yt2md.py that identifies who is speaking. **mlx-audio already ships Sortformer** — no new libraries needed.
 
-### 10A — Diarization pipeline (CRITICAL — verify all models load)
+### 10A — Verify Sortformer loads and runs (CRITICAL)
 
-Install and verify the 3 MLX diarization models:
-- **Silero VAD v5** (`aufklarer/Silero-VAD-v5-MLX`, ~1.2MB) — voice activity detection
-- **Pyannote Segmentation 3.0** (`mlx-community/pyannote-segmentation-3.0-mlx`, ~5.7MB) — per-frame speaker probabilities (up to 3 simultaneous)
-- **WeSpeaker ResNet34-LM** (`aufklarer/WeSpeaker-ResNet34-LM-MLX`, ~25MB) — speaker embeddings
+mlx-audio has `mlx_audio.vad` with Sortformer diarization built in:
+```python
+from mlx_audio.vad import load
+model = load("mlx-community/sortformer-diar-v1")  # auto-downloads ~50MB
+output = model.generate("audio.wav", threshold=0.5)
+# output.segments = [DiarizationSegment(start=0.0, end=5.2, speaker=0), ...]
+# output.num_speakers = 2
+```
 
-Check the actual API for each model before writing code. Reference implementation: https://github.com/ivan-digital/qwen3-asr-swift (Swift, but same pipeline).
+Verify this works on `test_audio/test_voice.mp3`. Check both:
+- `model.generate()` for offline diarization
+- `model.generate_stream()` for streaming (optional, nice-to-have)
 
-### 10B — Build diarization module
+Also check: does `mlx-community/sortformer-diar-v1` exist? If not, find the correct model ID by checking HuggingFace or `mlx_audio.vad` defaults.
 
-Create `diarize.py` with these functions:
-- `run_vad(audio_path) -> list[tuple[float, float]]` — speech segment boundaries via Silero
-- `run_segmentation(audio_path, speech_segments) -> ndarray` — per-frame speaker activity probabilities via pyannote
-- `extract_embeddings(audio_path, segments) -> ndarray` — speaker embeddings via WeSpeaker
-- `cluster_speakers(embeddings) -> list[int]` — agglomerative clustering via scipy/sklearn
-- `diarize(audio_path) -> list[dict]` — full pipeline: returns `[{speaker: "SPEAKER_0", start: 0.0, end: 5.2}, ...]`
+### 10B — Integrate into yt2md.py
 
-### 10C — Integrate into yt2md.py
+Add `--diarize` flag:
+1. After transcription, run Sortformer on the same audio file
+2. Align diarization segments (speaker + timestamps) to transcription segments (text + timestamps) by timestamp overlap
+3. Merge adjacent segments from the same speaker
 
-Add `--diarize` flag to the CLI:
-- When enabled: run diarization pipeline AFTER transcription
-- Align diarization segments to transcription segments (match by timestamp overlap)
-- Output format for markdown: `**SPEAKER_0**: text here...` per speaker turn
-- Output format for SRT: `[SPEAKER_0] text here...` in subtitle text
-- Frontmatter: add `speakers: N` field when diarization is used
-- Add diarization models to `download_models.py --diarize` flag
+Output formats:
+- **Markdown**: `**SPEAKER_0**: text here...` per speaker turn, blank line between turns
+- **SRT**: `[SPEAKER_0] text here...` in subtitle text
+- **Text**: `SPEAKER_0: text here...`
+- **Frontmatter**: add `speakers: N` field
 
-### 10D — Tests
-- Unit tests mocking all 3 models (VAD, segmentation, embeddings)
-- Integration test with real audio (test_voice.mp3 — single speaker should produce SPEAKER_0 only)
-- Test alignment logic: given mock diarization + mock transcription segments, verify correct speaker assignment
+Add `--diarize` model to `download_models.py --diarize` flag.
 
-**Success**: `python yt2md.py test_audio/test_voice.mp3 --diarize` produces markdown with speaker labels. Multi-speaker audio correctly identifies different speakers.
+### 10C — Tests
+- Unit tests mocking Sortformer model (test alignment logic, output formatting with speaker labels)
+- Integration test with real audio (test_voice.mp3 — single speaker → SPEAKER_0 only)
+- Test edge cases: overlapping speakers, empty segments, no speech detected
 
-**New deps**: `scikit-learn>=1.0`, `scipy>=1.10` (for agglomerative clustering)
+**Success**: `python yt2md.py test_audio/test_voice.mp3 --diarize` produces markdown with speaker labels. No new dependencies beyond mlx-audio.
+
+**No new deps needed** — Sortformer ships with mlx-audio[stt] which is already in requirements.txt
 
 ## Phase 8 — Polish & Keep Going ✅ DONE
 
