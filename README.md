@@ -1,20 +1,16 @@
-# 2md — Anything to Markdown
+# any2md — Convert Anything to Markdown
 
-A toolkit for converting media, documents, and web content to markdown. All AI inference runs locally on Apple Silicon via MLX — no cloud APIs.
+A toolkit for converting any media, document, or data format to markdown. AI inference runs locally on Apple Silicon via MLX — no cloud APIs.
 
 ## Install
 
 ```bash
-# From PyPI (coming soon)
-uv pip install '2md[all]'
-
 # From source
-git clone https://github.com/roboalchemist/2md.git
-cd 2md
+git clone https://github.com/roboalchemist/2md.git && cd 2md
 uv pip install -e '.[all]'
 
 # Or install only what you need
-uv pip install -e '.[stt]'    # YouTube/audio/video transcription
+uv pip install -e '.[stt]'    # Audio/video transcription
 uv pip install -e '.[pdf]'    # PDF extraction
 uv pip install -e '.[img]'    # Image OCR via VLM
 uv pip install -e '.[web]'    # Web page conversion
@@ -25,67 +21,67 @@ brew install ffmpeg
 
 ## Usage
 
-### Auto-detect (just pass a file)
+Just pass a file — any2md auto-detects the format:
 
 ```bash
-2md lecture.mp4                        # audio/video → markdown
-2md lecture.mp4 --diarize              # with speaker diarization
-2md document.pdf                       # PDF → markdown
-2md screenshot.png                     # image → markdown (VLM)
-2md https://example.com/article        # web page → markdown
-2md page.html                          # local HTML → markdown
-2md report.docx                        # office doc → markdown
-2md readme.rst                         # RST → markdown
+any2md lecture.mp4                  # audio/video → markdown
+any2md podcast.mp3 --diarize        # with speaker diarization
+any2md document.pdf                 # PDF → markdown
+any2md screenshot.png               # image → markdown (VLM OCR)
+any2md https://example.com          # web page → markdown
+any2md page.html                    # local HTML → markdown
+any2md report.docx                  # office doc → markdown
+any2md data.csv                     # CSV/TSV → markdown table
+any2md config.json                  # JSON/YAML → markdown
+any2md app.db                       # SQLite → schema + data
+any2md captions.srt                 # subtitles → markdown
+any2md notebook.ipynb               # Jupyter → markdown
+any2md message.eml                  # email → markdown
+any2md notes.org                    # Org-mode → markdown
+any2md paper.tex                    # LaTeX → markdown
+any2md command.1                    # man page → markdown
+any2md readme.rst                   # RST → markdown
 ```
 
-### Explicit subcommands (for full options)
+Use explicit subcommands for full control:
 
 ```bash
-2md yt --help       # audio/video options
-2md pdf --help      # PDF options
-2md img --help      # image options
-2md web --help      # web URL options
-2md html --help     # local HTML options
-2md doc --help      # office document options
-2md rst --help      # RST options
+any2md yt podcast.mp3 --diarize --model parakeet-1.1b -f srt
+any2md pdf document.pdf --pages 1-10 --ocr
+any2md csv data.tsv --max-rows 50 --max-col-width 40
+any2md db app.sqlite --max-rows 20 --skip-views
+any2md sub captions.vtt -f txt
+any2md nb notebook.ipynb --no-outputs
 ```
 
-### Examples
+## Supported Formats (16)
 
-```bash
-# YouTube with speaker diarization
-2md yt "https://www.youtube.com/watch?v=dQw4w9WgXcQ" --diarize -o ~/notes
+| Subcommand | Input | Engine | Dependencies |
+|------------|-------|--------|-------------|
+| `yt` | YouTube, audio, video | Parakeet STT + Sortformer diarization | mlx-audio, yt-dlp |
+| `pdf` | PDF files | pymupdf4llm + optional Qwen VLM OCR | pymupdf4llm |
+| `img` | JPEG, PNG, GIF, BMP, WebP, TIFF | Qwen2.5-VL (mlx-vlm) | mlx-vlm |
+| `web` | Web URLs | ReaderLM-v2 (mlx-lm) | mlx-lm |
+| `html` | Local HTML files | ReaderLM-v2 (mlx-lm) | mlx-lm |
+| `doc` | DOCX, PPTX, XLSX, EPUB, ODT, RTF | markitdown | markitdown |
+| `rst` | reStructuredText | pypandoc / docutils | — |
+| `csv` | CSV, TSV | stdlib csv | **none** |
+| `data` | JSON, YAML, JSONL | stdlib json, optional PyYAML | **none** |
+| `db` | SQLite databases | stdlib sqlite3 | **none** |
+| `sub` | SRT, VTT, ASS/SSA subtitles | pysubs2 | pysubs2 |
+| `nb` | Jupyter notebooks | stdlib json | **none** |
+| `eml` | Email .eml, .mbox | stdlib email/mailbox | **none** |
+| `org` | Emacs Org-mode | pure regex | **none** |
+| `tex` | LaTeX | pure regex | **none** |
+| `man` | Unix man pages | mandoc + regex fallback | **none** |
 
-# PDF with page range
-2md pdf document.pdf -p 1-10,15 -o ~/notes
-
-# PDF with VLM OCR for scanned pages
-2md pdf scanned.pdf --ocr
-
-# Image directory
-2md img ~/screenshots/ --prompt "Extract all text and tables"
-
-# Specific model
-2md yt podcast.mp3 -m parakeet-1.1b -f srt
-```
-
-## Tools
-
-| Subcommand | Input | Engine | Output |
-|------------|-------|--------|--------|
-| `yt` | YouTube URLs, audio, video | Parakeet STT + Sortformer diarization (mlx-audio) | md / srt / txt |
-| `pdf` | PDF files | pymupdf4llm, optional Qwen VLM OCR | md / txt |
-| `img` | JPEG, PNG, GIF, BMP, WebP, TIFF | Qwen2.5-VL (mlx-vlm) | md / txt |
-| `web` | Web URLs | ReaderLM-v2 (mlx-lm) | md / txt |
-| `html` | Local HTML files | ReaderLM-v2 (mlx-lm) | md / txt |
-| `doc` | DOCX, PPTX, XLSX, EPUB, ODT, RTF | markitdown | md / txt |
-| `rst` | reStructuredText | pypandoc / docutils | md / txt |
+**7 of 16 converters are zero-dependency** (stdlib only).
 
 ## Architecture
 
 ```
-src/tomd/
-├── cli.py       # Unified entry point with auto-detect + subcommands
+src/any2md/
+├── cli.py       # Unified entry point — auto-detect + 16 subcommands
 ├── common.py    # Shared: frontmatter builder, logging, output helpers
 ├── yt.py        # Audio/video transcription + speaker diarization
 ├── pdf.py       # PDF extraction + optional VLM OCR
@@ -93,18 +89,21 @@ src/tomd/
 ├── web.py       # Web URL → markdown via ReaderLM
 ├── html.py      # Local HTML → markdown via ReaderLM
 ├── doc.py       # Office documents via markitdown
-└── rst.py       # reStructuredText conversion
+├── rst.py       # reStructuredText conversion
+├── csv.py       # CSV/TSV → markdown tables
+├── data.py      # JSON/YAML/JSONL → smart markdown
+├── db.py        # SQLite → schema + sample data tables
+├── sub.py       # Subtitles (SRT/VTT/ASS) → timestamped markdown
+├── nb.py        # Jupyter notebooks → markdown
+├── eml.py       # Email (.eml/.mbox) → markdown
+├── org.py       # Org-mode → markdown
+├── tex.py       # LaTeX → markdown
+└── man.py       # Unix man pages → markdown
 ```
 
-All tools produce YAML frontmatter with source metadata (title, author, dates, etc.) followed by the converted markdown body.
+All tools produce YAML frontmatter with source metadata followed by the converted markdown body.
 
-AI runs locally on Apple Silicon via MLX:
-- **STT**: mlx-audio Parakeet — speech recognition
-- **Diarization**: mlx-audio Sortformer — speaker identification
-- **VLM**: mlx-vlm Qwen2.5-VL — image OCR and understanding
-- **HTML→MD**: mlx-lm ReaderLM-v2 — HTML to markdown
-
-## Pre-download models
+## Pre-download AI models
 
 ```bash
 python scripts/download_models.py --stt       # Parakeet (yt)
@@ -117,9 +116,9 @@ python scripts/download_models.py --all       # Everything
 ## Requirements
 
 - Python 3.11+
-- Apple Silicon Mac (M1/M2/M3/M4)
+- Apple Silicon Mac (M1/M2/M3/M4) — for AI-powered converters
 - ffmpeg (`brew install ffmpeg`) — for audio/video
-- pandoc (`brew install pandoc`) — optional, for rst2md
+- Non-AI converters (csv, data, db, nb, eml, org, tex, man) work on any platform
 
 ## License
 
