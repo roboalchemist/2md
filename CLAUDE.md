@@ -13,7 +13,7 @@ any2md/
 │   ├── cli.py           # Unified entry point — auto-detect + subcommands (200 lines)
 │   ├── common.py        # Shared: build_frontmatter(), setup_logging(), OutputFormat, write_output() (155 lines)
 │   ├── yt.py            # Audio/video/YouTube transcription + Sortformer diarization (847 lines)
-│   ├── pdf.py           # PDF extraction + optional VLM OCR via mlx-vlm (577 lines)
+│   ├── pdf.py           # PDF extraction + optional VLM OCR via mlx-vlm (578 lines)
 │   ├── img.py           # Image OCR via Qwen3.5 (mlx-vlm) (422 lines)
 │   ├── web.py           # Web URL → markdown via ReaderLM-v2 (mlx-lm) (448 lines)
 │   ├── html.py          # Local HTML → markdown via ReaderLM-v2 (285 lines)
@@ -56,7 +56,7 @@ any2md/
 └── README.md
 ```
 
-**Total**: 8,698 lines of source code across 18 modules. 739 tests.
+**Total**: 8,700 lines of source code across 18 modules. 740 tests.
 
 ## Key Libraries & Dependencies
 
@@ -153,7 +153,7 @@ python scripts/download_models.py --all
 ## Testing
 
 - **Framework**: unittest.TestCase classes, run via pytest
-- **Test count**: 739 collected tests
+- **Test count**: 740 collected tests
 - **Run all unit tests**: `python -m pytest tests/`
 - **Run specific**: `python -m pytest tests/test_csv.py -v`
 - **Slow tests** (real inference): `python -m pytest tests/test_inference.py -m slow -v -s`
@@ -195,4 +195,4 @@ See [GOALS.md](GOALS.md) for the full expansion plan. Key areas:
 
 ## Project History
 
-Originally `yt2srt` on `lightning-whisper-mlx`. Migrated to `yt2md` on `mlx-audio` with Parakeet, rewritten from argparse to typer. Then expanded from 2 tools (yt2md + pdf2md) to 16 converters as a proper Python package (`src/any2md/`) with unified CLI, optional dependency groups, and 739 tests.
+Originally `yt2srt` on `lightning-whisper-mlx`. Migrated to `yt2md` on `mlx-audio` with Parakeet, rewritten from argparse to typer. Then expanded from 2 tools (yt2md + pdf2md) to 16 converters as a proper Python package (`src/any2md/`) with unified CLI, optional dependency groups, and 740 tests.
