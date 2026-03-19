@@ -6,7 +6,7 @@ A toolkit for converting any media, document, or data format to markdown. AI inf
 
 ```bash
 # From source
-git clone https://github.com/roboalchemist/2md.git && cd 2md
+git clone https://github.com/roboalchemist/any2md.git && cd any2md
 uv pip install -e '.[all]'
 
 # Or install only what you need
@@ -46,7 +46,9 @@ any2md readme.rst                   # RST → markdown
 Use explicit subcommands for full control:
 
 ```bash
-any2md yt podcast.mp3 --diarize --model parakeet-1.1b -f srt
+any2md audio podcast.mp3 --diarize --model parakeet-1.1b
+any2md video lecture.mp4 -f srt -o ~/subtitles
+any2md yt "https://youtube.com/watch?v=..." --diarize
 any2md pdf document.pdf --pages 1-10 --ocr
 any2md csv data.tsv --max-rows 50 --max-col-width 40
 any2md db app.sqlite --max-rows 20 --skip-views
@@ -54,11 +56,13 @@ any2md sub captions.vtt -f txt
 any2md nb notebook.ipynb --no-outputs
 ```
 
-## Supported Formats (16)
+## Supported Formats
 
 | Subcommand | Input | Engine | Dependencies |
 |------------|-------|--------|-------------|
-| `yt` | YouTube, audio, video | Parakeet STT + Sortformer diarization | mlx-audio, yt-dlp |
+| `audio` | MP3, WAV, FLAC, OGG, AAC, M4A | Parakeet STT + Sortformer diarization | mlx-audio |
+| `video` | MP4, MKV, AVI, MOV, WebM | Parakeet STT + Sortformer diarization | mlx-audio |
+| `yt` | YouTube URLs + all audio/video | Parakeet STT + yt-dlp download | mlx-audio, yt-dlp |
 | `pdf` | PDF files | pymupdf4llm + optional Qwen VLM OCR | pymupdf4llm |
 | `img` | JPEG, PNG, GIF, BMP, WebP, TIFF | Qwen2.5-VL (mlx-vlm) | mlx-vlm |
 | `web` | Web URLs | ReaderLM-v2 (mlx-lm) | mlx-lm |
@@ -75,15 +79,15 @@ any2md nb notebook.ipynb --no-outputs
 | `tex` | LaTeX | pure regex | **none** |
 | `man` | Unix man pages | mandoc + regex fallback | **none** |
 
-**7 of 16 converters are zero-dependency** (stdlib only).
+**7 of 16 converters are zero-dependency** (stdlib only). `audio` and `video` are aliases for `yt` (same engine, clearer naming).
 
 ## Architecture
 
 ```
 src/any2md/
-├── cli.py       # Unified entry point — auto-detect + 16 subcommands
+├── cli.py       # Unified entry point — auto-detect + subcommands
 ├── common.py    # Shared: frontmatter builder, logging, output helpers
-├── yt.py        # Audio/video transcription + speaker diarization
+├── yt.py        # Audio/video/YouTube transcription + speaker diarization
 ├── pdf.py       # PDF extraction + optional VLM OCR
 ├── img.py       # Image OCR via vision-language model
 ├── web.py       # Web URL → markdown via ReaderLM
@@ -106,8 +110,8 @@ All tools produce YAML frontmatter with source metadata followed by the converte
 ## Pre-download AI models
 
 ```bash
-python scripts/download_models.py --stt       # Parakeet (yt)
-python scripts/download_models.py --diarize   # Sortformer (yt --diarize)
+python scripts/download_models.py --stt       # Parakeet (audio/video)
+python scripts/download_models.py --diarize   # Sortformer (--diarize)
 python scripts/download_models.py --vlm       # Qwen2.5-VL (img, pdf --ocr)
 python scripts/download_models.py --reader    # ReaderLM-v2 (web, html)
 python scripts/download_models.py --all       # Everything
