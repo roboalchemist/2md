@@ -1,157 +1,198 @@
-# 2md - Media to Markdown Toolkit
+# any2md — Convert Anything to Markdown
 
 ## Overview
 
-A toolkit for converting media (YouTube videos, audio files, PDFs) to markdown with YAML frontmatter. Built on [mlx-audio](https://github.com/Blaizzy/mlx-audio) (Parakeet v3) for transcription and [pymupdf4llm](https://github.com/pymupdf/RAG) for PDF extraction. Optimized for Apple Silicon.
+A toolkit for converting any media, document, or data format to markdown with YAML frontmatter. AI inference runs locally on Apple Silicon via MLX. No cloud APIs. 16 converters, 7 zero-dependency (stdlib only).
 
 ## Project Structure
 
 ```
-2md/
-├── yt2md.py               # YouTube/audio/video → markdown/SRT/text (typer CLI)
-├── pdf2md.py              # PDF → markdown/text (typer CLI, imports build_frontmatter from yt2md)
-├── whisper_benchmark.py   # Interactive benchmark: compare Parakeet models
-├── benchmark_models.py    # Automated benchmark: warmup + timed runs
-├── download_models.py     # Pre-download mlx-audio models from HuggingFace
-├── quant_test.py          # Quick model smoke test
-├── transcription_cleanup_prompt.txt  # LLM prompt template for cleaning raw transcripts
-├── requirements.txt       # Python dependencies
-├── test_yt2md.py          # 15 unit tests for yt2md
-├── test_pdf2md.py         # 10 unit tests for pdf2md
-├── test_benchmark.py      # 3 integration tests for whisper_benchmark (requires mlx-audio)
-├── test_audio/            # Test audio files (mp3/wav, tracked via .gitignore exceptions)
-├── benchmark-results/     # Generated benchmark reports (gitignored)
-├── worklog.md             # Development history (mostly from lightning-whisper-mlx era)
-└── .cursor/mcp.json       # Cursor MCP config
+any2md/
+├── src/any2md/
+│   ├── __init__.py      # Package init, __version__
+│   ├── cli.py           # Unified entry point — auto-detect + subcommands (200 lines)
+│   ├── common.py        # Shared: build_frontmatter(), setup_logging(), OutputFormat, write_output() (155 lines)
+│   ├── yt.py            # Audio/video/YouTube transcription + Sortformer diarization (847 lines)
+│   ├── pdf.py           # PDF extraction + optional VLM OCR via mlx-vlm (577 lines)
+│   ├── img.py           # Image OCR via Qwen3.5 (mlx-vlm) (422 lines)
+│   ├── web.py           # Web URL → markdown via ReaderLM-v2 (mlx-lm) (448 lines)
+│   ├── html.py          # Local HTML → markdown via ReaderLM-v2 (285 lines)
+│   ├── doc.py           # Office docs via markitdown (DOCX/PPTX/XLSX/EPUB/ODT/RTF) (334 lines)
+│   ├── rst.py           # reStructuredText via pypandoc/docutils fallback (397 lines)
+│   ├── csv.py           # CSV/TSV → markdown tables, stdlib only (456 lines)
+│   ├── data.py          # JSON/YAML/JSONL → smart markdown, stdlib + optional PyYAML (565 lines)
+│   ├── db.py            # SQLite → schema + sample data, stdlib only (545 lines)
+│   ├── sub.py           # Subtitles (SRT/VTT/ASS) via pysubs2 (407 lines)
+│   ├── nb.py            # Jupyter notebooks, stdlib only (400 lines)
+│   ├── eml.py           # Email (.eml/.mbox), stdlib only (505 lines)
+│   ├── org.py           # Org-mode, pure regex (669 lines)
+│   ├── tex.py           # LaTeX, pure regex (766 lines)
+│   └── man.py           # Unix man pages, mandoc + regex fallback (733 lines)
+├── tests/
+│   ├── conftest.py      # Minimal (docstring only)
+│   ├── create_fixtures.py
+│   ├── fixtures/        # sample.{docx,html,ipynb,jpg,pdf,pptx,rst,xlsx}
+│   ├── audio/           # test audio files (mp3/wav)
+│   ├── test_yt.py       # 18 tests (unittest.TestCase)
+│   ├── test_pdf.py      # 10 tests
+│   ├── test_web.py      # 13 tests
+│   ├── test_html.py     # 22 tests
+│   ├── test_doc.py      # 16 tests
+│   ├── test_img.py      # 32 tests
+│   ├── test_rst.py      # 27 tests
+│   ├── test_csv.py      # 74 tests
+│   ├── test_data.py     # 97 tests
+│   ├── test_db.py, test_sub.py, test_nb.py, test_eml.py, test_org.py, test_tex.py, test_man.py
+│   ├── test_inference.py    # 14 @pytest.mark.slow (real model inference)
+│   └── test_integration.py  # 9 @pytest.mark.integration (real file fixtures)
+├── scripts/
+│   ├── benchmark_models.py
+│   └── download_models.py
+├── pyproject.toml       # hatchling build, optional deps groups
+├── pytest.ini
+├── requirements.txt
+├── GOALS.md             # Full expansion plan and MLX model stack
+├── GOAL.md
+└── README.md
 ```
 
+**Total**: 8,698 lines of source code across 18 modules. 739 tests.
 
 ## Key Libraries & Dependencies
 
-| Library | Version | Purpose |
-|---------|---------|---------|
-| `mlx-audio[stt]` | >=0.4.0 | Parakeet/Whisper STT on Apple Silicon (MLX) |
-| `pymupdf4llm` | >=0.2.0 | PDF text extraction to markdown |
-| `typer` | >=0.9.0 | CLI framework (with `typing_extensions`, `rich_markup_mode`) |
-| `yt-dlp` | >=2023.11.14 | YouTube audio download |
-| `numba` | >=0.61.0 | JIT compilation (mlx-audio dependency) |
-| `numpy` | >=2.0.0 | Numerical arrays |
-| `tqdm` | >=4.64.1 | Progress bars |
-| `more-itertools` | >=10.1.0 | Iterator utilities |
-| `ffmpeg`/`ffprobe` | system | Audio conversion and duration detection |
+| Library | Purpose | Optional Group |
+|---------|---------|----------------|
+| `typer` | CLI framework (required for all) | core |
+| `mlx-audio[stt]` | Parakeet STT + Sortformer diarization | `[stt]` |
+| `yt-dlp` | YouTube audio download | `[stt]` |
+| `pymupdf4llm` | PDF text extraction | `[pdf]` |
+| `mlx-vlm` | Image/PDF OCR via Qwen3.5 | `[img]` |
+| `mlx-lm` | HTML→markdown via ReaderLM-v2 | `[web]` |
+| `httpx` | HTTP fetching for web URLs | `[web]` |
+| `markitdown` | Office document conversion | `[doc]` |
+| `pypandoc` | RST conversion (docutils fallback) | `[rst]` |
+| `pysubs2` | Subtitle parsing | runtime |
+| `trafilatura` | Web metadata extraction fallback | runtime |
+| `Pillow` | Image handling for VLM | runtime |
+| `ffmpeg`/`ffprobe` | Audio conversion (system dep) | system |
+
+**Zero-dep converters** (stdlib only): csv, data, db, nb, eml, org, tex, man
 
 ## Architecture
 
-### Code Organization
+### Entry Point
 
-- **yt2md.py** (759 lines) — Main transcription tool, also exports shared utilities
-  - `build_frontmatter(metadata)` — Hand-rolled YAML frontmatter generator (no PyYAML dep)
-  - `resolve_model(name)` — Alias resolution for model short names
-  - `extract_video_id(url_or_id)` — YouTube URL/ID parser
-  - `auto_detect_input(path)` — Determines if input is YouTube URL, YouTube ID, or local file
-  - `download_youtube_audio(url_or_id)` — yt-dlp wrapper returning (audio_path, metadata)
-  - `convert_audio_for_whisper(input)` — ffmpeg to 16kHz mono WAV
-  - `transcribe(audio_file, ...)` — mlx-audio model.generate() wrapper
-  - `segments_to_markdown/srt/text()` — Output formatters
-  - `OutputFormat` — Enum: md, srt, txt
-  - `app` — typer.Typer CLI app
+`any2md.cli:app` — registered as `any2md` console script via pyproject.toml.
 
-- **pdf2md.py** (320 lines) — PDF extraction tool
-  - Imports `build_frontmatter` from `yt2md` (shared code)
-  - `parse_page_range(range_str, total)` — "1-10,15,20-25" → 0-based indices
-  - `extract_pdf_metadata(doc)` — fitz Document metadata extraction
-  - `extract_pages(pdf_path, page_indices)` — pymupdf4llm.to_markdown() with page_chunks
-  - `pages_to_markdown/text()` — Output formatters
-  - `OutputFormat` — Enum: md, txt (no SRT for PDFs)
-  - `app` — typer.Typer CLI app
+**Auto-detection**: `_detect_tool(input)` maps file extensions/URLs to converter names. YouTube URLs and 11-char IDs → `yt`, HTTP URLs → `web`, then by extension.
+
+**Lazy imports**: `_get_tool_apps()` wraps each converter import in try/except to tolerate missing optional deps. Each converter exports a `typer.Typer()` app.
+
+**Subcommands**: `yt`, `audio`, `video`, `pdf`, `img`, `web`, `html`, `doc`, `rst`, `csv`, `data`, `db`, `sub`, `nb`, `eml`, `org`, `tex`, `man`. `audio` and `video` are aliases for `yt`.
+
+### Converter Pattern
+
+Every converter module follows the same pattern:
+1. Imports `build_frontmatter`, `OutputFormat`, `write_output`, `setup_logging` from `any2md.common`
+2. Defines a `typer.Typer()` app with consistent CLI flags: `--output-dir`, `--format`, `--verbose`
+3. Has a `process_*_file()` main function
+4. Extracts metadata → builds frontmatter → converts content → writes output
+5. External deps wrapped in try/except with graceful fallbacks
+
+### Shared Module: `common.py`
+
+- `build_frontmatter(metadata: dict) -> str` — Hand-rolled YAML formatter (no PyYAML dep). Handles scalars, lists, nested dicts (chapters), multi-line strings (description via `|` block scalar), auto-quoting special chars.
+- `OutputFormat(str, Enum)` — `md`, `txt`
+- `setup_logging(verbose)` — Configures root logger
+- `write_output(content, path)` — File writer with parent dir creation
+- `load_vlm(model)` — Stub for mlx-vlm loading
 
 ### Data Flow
 
 ```
-yt2md: Input → auto_detect → [yt-dlp download | local file] → ffmpeg convert → mlx-audio transcribe → format → write
-pdf2md: PDF → fitz metadata → pymupdf4llm extract → format with frontmatter → write
+cli.py: argv → _detect_tool() or explicit subcommand → lazy import converter → converter.app()
+Each converter: input → extract metadata → convert content → build_frontmatter() → write_output()
+yt.py: input → auto_detect → [yt-dlp | local file] → ffmpeg 16kHz WAV → mlx-audio transcribe → format
+pdf.py: PDF → pymupdf4llm extract (fast) or VLM OCR (scanned pages) → format
+web.py: URL → httpx fetch → ReaderLM-v2 (mlx-lm) → markdown
+img.py: image → Qwen3.5 (mlx-vlm) → markdown
 ```
 
 ### Model System
 
-Default model: `mlx-community/parakeet-tdt-0.6b-v3`
+| Model | Library | Default ID | Use |
+|-------|---------|-----------|-----|
+| Parakeet v3 | mlx-audio | `mlx-community/parakeet-tdt-0.6b-v3` | Audio/video STT |
+| Sortformer | mlx-audio | sortformer diarization model | Speaker diarization |
+| ReaderLM-v2 | mlx-lm | `mlx-community/jinaai-ReaderLM-v2` | HTML→markdown |
+| Qwen3.5-9B | mlx-vlm | `mlx-community/Qwen3.5-9B-MLX-4bit` | Image OCR, PDF OCR |
 
-| Alias | Full HuggingFace ID |
-|-------|---------------------|
-| `parakeet-v3` | `mlx-community/parakeet-tdt-0.6b-v3` |
-| `parakeet-v2` | `mlx-community/parakeet-tdt-0.6b-v2` |
-| `parakeet-1.1b` | `mlx-community/parakeet-tdt-1.1b` |
-| `parakeet-ctc` | `mlx-community/parakeet-ctc-0.6b` |
-
-
-### Frontmatter
-
-Both tools generate YAML frontmatter using a shared `build_frontmatter()` that manually formats YAML (no PyYAML dependency). Handles scalars, lists, nested dicts (chapters), multi-line strings (description via `|` block scalar), and auto-quoting of special characters.
-
-**YouTube frontmatter fields**: title, video_id, url, channel, channel_url, uploader, upload_date, duration, duration_human, language, location, availability, live_status, view_count, like_count, comment_count, channel_follower_count, thumbnail, categories, tags, subtitles, auto_captions, chapters, description, fetched_at
-
-**PDF frontmatter fields**: title, author, subject, keywords, creator, producer, created, modified, format, pages, source, fetched_at
-
-## Testing
-
-- **Framework**: `unittest` (stdlib classes), run via `pytest`
-- **Test count**: 25 passing (15 yt2md + 10 pdf2md)
-- **Run all**: `python -m pytest test_yt2md.py test_pdf2md.py`
-- **Run individually**: `python -m pytest test_yt2md.py -v` or `python -m pytest test_pdf2md.py -v`
-- **Test patterns**: FakeAlignedSentence objects mock mlx-audio output; dict-based test data for backward compat
-- **No integration tests**: Tests cover pure functions only (formatting, parsing, frontmatter), not actual transcription or download
-- **Benchmark tests** (`test_benchmark.py`): 3 integration tests requiring mlx-audio installed
-
-## CLI Reference
-
-### yt2md.py
-
-```bash
-python yt2md.py <input> [OPTIONS]
-
-# Input: YouTube URL, video ID (11 chars), or local file path
-# Options:
-#   -m, --model TEXT          Model alias or HuggingFace ID [default: mlx-community/parakeet-tdt-0.6b-v3]
-#   -o, --output-dir PATH     Output directory [default: cwd]
-#   -f, --format [md|srt|txt] Output format [default: md]
-#   -c, --chunk-duration FLOAT Chunk length in seconds [default: 30.0]
-#   -k, --keep-audio          Keep downloaded/converted audio files
-#   -v, --verbose             DEBUG logging
-```
-
-### pdf2md.py
-
-```bash
-python pdf2md.py <input.pdf> [OPTIONS]
-
-# Options:
-#   -o, --output-dir PATH     Output directory [default: cwd]
-#   -f, --format [md|txt]     Output format [default: md]
-#   -p, --pages TEXT           Page range (e.g. "1-10,15,20-25")
-#   -v, --verbose             DEBUG logging
-```
+Model aliases in yt.py: `parakeet-v3`, `parakeet-v2`, `parakeet-1.1b`, `parakeet-ctc`
+Model aliases in img.py: `qwen3.5-4b`, `qwen3.5-9b` (default), `qwen3.5-27b`, `qwen3.5-35b`, `smoldocling`
 
 ## Installation
 
 ```bash
-brew install ffmpeg
-pip install -r requirements.txt
+# Editable install with all optional deps
+uv pip install -e '.[all]'
 
-# Optional: pre-download STT models (requires fixing download_models.py imports first)
-# python download_models.py
+# Or only what you need
+uv pip install -e '.[stt]'    # Audio/video
+uv pip install -e '.[pdf]'    # PDF
+uv pip install -e '.[img]'    # Image OCR
+uv pip install -e '.[web]'    # Web pages
+uv pip install -e '.[doc]'    # Office docs
+
+# System dep for audio/video
+brew install ffmpeg
+
+# Pre-download AI models
+python scripts/download_models.py --all
+```
+
+## Testing
+
+- **Framework**: unittest.TestCase classes, run via pytest
+- **Test count**: 739 collected tests
+- **Run all unit tests**: `python -m pytest tests/`
+- **Run specific**: `python -m pytest tests/test_csv.py -v`
+- **Slow tests** (real inference): `python -m pytest tests/test_inference.py -m slow -v -s`
+- **Integration tests** (real fixtures): `python -m pytest tests/test_integration.py -m integration -v`
+- **Markers**: `@pytest.mark.slow` (14 tests), `@pytest.mark.integration` (9 tests)
+- **Pattern**: unittest.TestCase with `unittest.mock.patch()` for mocking. FakeAlignedSentence objects for mlx-audio mocks. Tests auto-skip if models not cached.
+- **Fixtures**: `tests/fixtures/` (sample files), `tests/audio/` (audio files)
+- **Config**: `pyproject.toml` `[tool.pytest.ini_options]` + `pytest.ini`
+
+## CLI Reference
+
+```bash
+# Auto-detect (just pass a file or URL)
+any2md <input>
+
+# Explicit subcommands
+any2md yt <input> [--model NAME] [--diarize] [--format md|srt|txt] [--chunk-duration FLOAT] [--keep-audio]
+any2md pdf <input> [--pages "1-10,15"] [--ocr]
+any2md img <input> [--model NAME]
+any2md web <url>
+any2md csv <input> [--max-rows N] [--max-col-width N]
+any2md db <input> [--max-rows N] [--skip-views]
+any2md sub <input>
+any2md nb <input> [--no-outputs]
+
+# Common flags for all subcommands
+  -o, --output-dir PATH     # Output directory (default: cwd)
+  -f, --format [md|txt]     # Output format (default: md)
+  -v, --verbose             # DEBUG logging
 ```
 
 ## Roadmap
 
-See [GOALS.md](GOALS.md) for the full expansion plan. Key additions planned:
-- `web2md.py` — URLs → markdown via ReaderLM-v2 (mlx-lm, local inference)
-- `doc2md.py` — DOCX/PPTX/XLSX/EPUB → markdown via markitdown
-- `img2md.py` — Images → markdown via Qwen3.5 VLM (mlx-vlm, local inference)
-- `html2md.py` — Local HTML files → markdown via ReaderLM-v2
-- Shared `md_common.py` module for frontmatter, logging, output
-
-All AI runs locally on Apple Silicon via MLX. No cloud APIs.
+See [GOALS.md](GOALS.md) for the full expansion plan. Key areas:
+- Enhanced pdf2md with hybrid VLM fallback for scanned pages
+- Qwen3.5 as primary VLM (all sizes natively multimodal)
+- SmolDocling-256M for ultra-fast document extraction
+- Memory budget optimization for 36GB MacBook
 
 ## Project History
 
-Originally built as `yt2srt` on `lightning-whisper-mlx`. Migrated to `yt2md` on `mlx-audio` with Parakeet, then rewritten from argparse to typer. Only Parakeet models are supported (Whisper models removed).
+Originally `yt2srt` on `lightning-whisper-mlx`. Migrated to `yt2md` on `mlx-audio` with Parakeet, rewritten from argparse to typer. Then expanded from 2 tools (yt2md + pdf2md) to 16 converters as a proper Python package (`src/any2md/`) with unified CLI, optional dependency groups, and 739 tests.

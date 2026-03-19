@@ -251,8 +251,8 @@ class TestVlmFallback(unittest.TestCase):
         self.assertEqual(result, 'Extracted markdown text')
 
     def test_vlm_model_default_constant(self):
-        """VLM_MODEL_DEFAULT should be the expected Qwen2.5 model string."""
-        self.assertEqual(VLM_MODEL_DEFAULT, "mlx-community/Qwen2.5-VL-7B-Instruct-4bit")
+        """VLM_MODEL_DEFAULT should be the expected Qwen3.5 model string."""
+        self.assertEqual(VLM_MODEL_DEFAULT, "mlx-community/Qwen3.5-9B-MLX-4bit")
 
     def test_thin_page_threshold_constant(self):
         """THIN_PAGE_THRESHOLD should be 50."""

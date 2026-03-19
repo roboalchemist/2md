@@ -18,7 +18,7 @@ Verified working with torch==2.10.0 (or later) and mlx-vlm==0.4.0.
 ## Models used
 - STT:      mlx-community/parakeet-tdt-0.6b-v3   (~600MB)
 - HTML→MD:  mlx-community/ReaderLM-v2             (~869MB 4-bit)
-- VLM/OCR:  mlx-community/Qwen2.5-VL-3B-Instruct-4bit  (~2GB 4-bit)
+- VLM/OCR:  mlx-community/Qwen3.5-4B-MLX-4bit  (~2.5GB 4-bit)
 
 All models auto-download from HuggingFace Hub on first use.
 """
@@ -38,9 +38,8 @@ TWO_SPEAKERS_AUDIO = Path(__file__).parent / "audio" / "two_speakers.wav"
 YT_INTERVIEW_AUDIO = Path(__file__).parent / "audio" / "yt_interview.wav"
 
 READERLM_MODEL = "mlx-community/jinaai-ReaderLM-v2"
-# Use 3B as the smallest viable Qwen VL model with mlx-community support.
-# If this model isn't available, fall back to 7B (see comment in VLM tests below).
-QWEN_VL_MODEL = "mlx-community/Qwen2.5-VL-3B-Instruct-4bit"
+# Use 4B as the smallest viable Qwen3.5 model (all sizes are natively multimodal).
+QWEN_VL_MODEL = "mlx-community/Qwen3.5-4B-MLX-4bit"
 PARAKEET_MODEL = "mlx-community/parakeet-tdt-0.6b-v3"
 SORTFORMER_MODEL = "mlx-community/diar_sortformer_4spk-v1-fp32"
 
@@ -91,17 +90,29 @@ def test_readerlm_web_fetch_and_convert():
     Uses urllib directly (not httpx) to avoid SSL cert issues with pyenv Python
     that doesn't have macOS root certs in its ssl module's default path.
     """
+    import ssl
     import urllib.request
     from any2md.web import load_reader_model, html_to_markdown
 
     url = "https://example.com"
-    # Fetch via stdlib urllib (always has access to system certs on macOS)
+    # Try certifi CA bundle first, fall back to unverified for envs without root certs
+    try:
+        import certifi
+        ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+    except (ImportError, ssl.SSLError):
+        ssl_ctx = ssl.create_default_context()
     req = urllib.request.Request(
         url,
         headers={"User-Agent": "Mozilla/5.0 (compatible; test)"},
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        html = resp.read().decode("utf-8", errors="replace")
+    try:
+        resp = urllib.request.urlopen(req, timeout=30, context=ssl_ctx)
+    except urllib.error.URLError:
+        # Last resort: skip cert verification (test env only, hitting example.com)
+        ssl_ctx = ssl._create_unverified_context()
+        resp = urllib.request.urlopen(req, timeout=30, context=ssl_ctx)
+    html = resp.read().decode("utf-8", errors="replace")
+    resp.close()
 
     assert len(html) > 100, "Fetched HTML is too short"
 
@@ -116,16 +127,15 @@ def test_readerlm_web_fetch_and_convert():
 
 
 # ---------------------------------------------------------------------------
-# Qwen2.5-VL — Image OCR
+# Qwen3.5 — Image OCR
 # ---------------------------------------------------------------------------
 
 @pytest.mark.slow
 def test_vlm_image_ocr():
-    """img2md.py: Qwen2.5-VL reads text from a real image.
+    """img2md.py: Qwen3.5 reads text from a real image.
 
-    Uses QWEN_VL_MODEL (3B-Instruct-4bit). If that model ID doesn't exist on
-    HuggingFace, the load() call will fail with a clear error pointing to the
-    model name. In that case, update QWEN_VL_MODEL to 7B-Instruct-4bit.
+    Uses QWEN_VL_MODEL (Qwen3.5-4B-MLX-4bit). All Qwen3.5 models are natively
+    multimodal (text+image+video) — no separate "-VL" variant needed.
     sample.jpg has "Hello World" drawn on it — the VLM should recognise it.
     """
     from any2md.img import load_vlm_model, image_to_markdown_text, get_image_metadata
@@ -147,7 +157,7 @@ def test_vlm_image_ocr():
 
 
 # ---------------------------------------------------------------------------
-# Qwen2.5-VL — PDF page OCR (via pdf2md VLM path)
+# Qwen3.5 — PDF page OCR (via pdf2md VLM path)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.slow

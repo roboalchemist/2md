@@ -193,6 +193,7 @@ class TestRstToMarkdownText(unittest.TestCase):
     def test_import_error_falls_through_to_docutils(self):
         """If pypandoc raises ImportError, docutils fallback is tried."""
         import builtins
+        import sys
         real_import = builtins.__import__
 
         def mock_import(name, *args, **kwargs):
@@ -200,12 +201,17 @@ class TestRstToMarkdownText(unittest.TestCase):
                 raise ImportError("No module named 'pypandoc'")
             return real_import(name, *args, **kwargs)
 
-        with patch('builtins.__import__', side_effect=mock_import):
-            # Force re-import so the mock is hit inside the function
-            result = rst_to_markdown_text("Hello world.\n")
-        # Should still produce some output (from docutils fallback)
-        self.assertIsInstance(result, str)
-        self.assertIn('Hello world', result)
+        # Remove pypandoc from module cache so the mock import is actually hit
+        saved = sys.modules.pop('pypandoc', None)
+        try:
+            with patch('builtins.__import__', side_effect=mock_import):
+                result = rst_to_markdown_text("Hello world.\n")
+            # Should still produce some output (from docutils fallback)
+            self.assertIsInstance(result, str)
+            self.assertIn('Hello world', result)
+        finally:
+            if saved is not None:
+                sys.modules['pypandoc'] = saved
 
     def test_raises_runtime_error_if_no_library_available(self):
         """If both pypandoc and docutils are unavailable, raise RuntimeError."""

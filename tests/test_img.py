@@ -28,20 +28,24 @@ import any2md.img as img2md  # for patching
 class TestResolveModel(unittest.TestCase):
     """Tests for model alias resolution."""
 
-    def test_alias_qwen25_vl_7b(self):
-        result = resolve_model("qwen2.5-vl-7b")
-        self.assertEqual(result, "mlx-community/Qwen2.5-VL-7B-Instruct-4bit")
+    def test_alias_qwen35_9b(self):
+        result = resolve_model("qwen3.5-9b")
+        self.assertEqual(result, "mlx-community/Qwen3.5-9B-MLX-4bit")
 
-    def test_alias_qwen25_vl_3b(self):
-        result = resolve_model("qwen2.5-vl-3b")
-        self.assertEqual(result, "mlx-community/Qwen2.5-VL-3B-Instruct-4bit")
+    def test_alias_qwen35_4b(self):
+        result = resolve_model("qwen3.5-4b")
+        self.assertEqual(result, "mlx-community/Qwen3.5-4B-MLX-4bit")
+
+    def test_alias_qwen35_27b(self):
+        result = resolve_model("qwen3.5-27b")
+        self.assertEqual(result, "mlx-community/Qwen3.5-27B-4bit")
 
     def test_alias_smoldocling(self):
         result = resolve_model("smoldocling")
         self.assertEqual(result, "mlx-community/SmolDocling-256M-4bit")
 
     def test_passthrough_full_hf_id(self):
-        full_id = "mlx-community/Qwen2.5-VL-72B-Instruct-4bit"
+        full_id = "mlx-community/Qwen3.5-27B-4bit"
         self.assertEqual(resolve_model(full_id), full_id)
 
     def test_passthrough_unknown_alias(self):

@@ -73,7 +73,7 @@ except Exception:
 THIN_PAGE_THRESHOLD = 50
 
 # Default VLM model for OCR fallback
-VLM_MODEL_DEFAULT = "mlx-community/Qwen2.5-VL-7B-Instruct-4bit"
+VLM_MODEL_DEFAULT = "mlx-community/Qwen3.5-9B-MLX-4bit"
 
 VLM_EXTRACTION_PROMPT = """Extract all text from this document page as clean markdown.
 - Preserve tables as markdown tables
@@ -355,7 +355,9 @@ def extract_pages(pdf_path: str, page_indices: Optional[List[int]] = None) -> Li
 
     results = []
     for chunk in chunks:
-        page_num = chunk['metadata']['page'] + 1  # 0-based to 1-based
+        # pymupdf4llm >= 1.27 uses 'page_number', older versions use 'page'
+        meta = chunk['metadata']
+        page_num = (meta.get('page_number') or meta.get('page', 0)) + 1  # 0-based to 1-based
         text = chunk['text'].strip()
         is_thin = len(text) < THIN_PAGE_THRESHOLD
 

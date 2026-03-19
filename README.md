@@ -63,8 +63,8 @@ any2md nb notebook.ipynb --no-outputs
 | `audio` | MP3, WAV, FLAC, OGG, AAC, M4A | Parakeet STT + Sortformer diarization | mlx-audio |
 | `video` | MP4, MKV, AVI, MOV, WebM | Parakeet STT + Sortformer diarization | mlx-audio |
 | `yt` | YouTube URLs + all audio/video | Parakeet STT + yt-dlp download | mlx-audio, yt-dlp |
-| `pdf` | PDF files | pymupdf4llm + optional Qwen VLM OCR | pymupdf4llm |
-| `img` | JPEG, PNG, GIF, BMP, WebP, TIFF | Qwen2.5-VL (mlx-vlm) | mlx-vlm |
+| `pdf` | PDF files | pymupdf4llm + optional Qwen3.5 VLM OCR | pymupdf4llm |
+| `img` | JPEG, PNG, GIF, BMP, WebP, TIFF | Qwen3.5 (mlx-vlm) | mlx-vlm |
 | `web` | Web URLs | ReaderLM-v2 (mlx-lm) | mlx-lm |
 | `html` | Local HTML files | ReaderLM-v2 (mlx-lm) | mlx-lm |
 | `doc` | DOCX, PPTX, XLSX, EPUB, ODT, RTF | markitdown | markitdown |
@@ -112,7 +112,7 @@ All tools produce YAML frontmatter with source metadata followed by the converte
 ```bash
 python scripts/download_models.py --stt       # Parakeet (audio/video)
 python scripts/download_models.py --diarize   # Sortformer (--diarize)
-python scripts/download_models.py --vlm       # Qwen2.5-VL (img, pdf --ocr)
+python scripts/download_models.py --vlm       # Qwen3.5 (img, pdf --ocr)
 python scripts/download_models.py --reader    # ReaderLM-v2 (web, html)
 python scripts/download_models.py --all       # Everything
 ```

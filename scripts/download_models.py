@@ -37,7 +37,7 @@ STT_MODELS = [
 
 # VLM models
 VLM_MODELS = [
-    "mlx-community/Qwen2.5-VL-7B-Instruct-4bit",
+    "mlx-community/Qwen3.5-9B-MLX-4bit",
 ]
 
 # Reader models (URL-to-markdown)
@@ -139,7 +139,7 @@ def main(
     )] = False,
     vlm: Annotated[bool, typer.Option(
         "--vlm",
-        help="Download VLM models (Qwen2.5-VL-7B-Instruct-4bit).",
+        help="Download VLM models (Qwen3.5-9B-MLX-4bit).",
     )] = False,
     reader: Annotated[bool, typer.Option(
         "--reader",

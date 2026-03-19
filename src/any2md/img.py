@@ -12,7 +12,7 @@ Examples:
     python img2md.py photo.jpg
     python img2md.py screenshot.png -o ~/notes/
     python img2md.py /path/to/images/ -o ~/output/
-    python img2md.py diagram.png --model qwen2.5-vl-7b
+    python img2md.py diagram.png --model qwen3.5-9b
     python img2md.py scan.tiff -f txt
 """
 
@@ -55,14 +55,14 @@ SUPPORTED_FORMATS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", 
 
 # Short alias -> full HuggingFace model ID
 MODEL_ALIASES = {
-    "qwen2.5-vl-7b": "mlx-community/Qwen2.5-VL-7B-Instruct-4bit",
-    "qwen2.5-vl-3b": "mlx-community/Qwen2.5-VL-3B-Instruct-4bit",
-    "qwen2.5-vl-2b": "mlx-community/Qwen2.5-VL-2B-Instruct-4bit",
-    "qwen2.5-vl-72b": "mlx-community/Qwen2.5-VL-72B-Instruct-4bit",
+    "qwen3.5-4b": "mlx-community/Qwen3.5-4B-MLX-4bit",
+    "qwen3.5-9b": "mlx-community/Qwen3.5-9B-MLX-4bit",
+    "qwen3.5-27b": "mlx-community/Qwen3.5-27B-4bit",
+    "qwen3.5-35b": "mlx-community/Qwen3.5-35B-A3B-4bit",
     "smoldocling": "mlx-community/SmolDocling-256M-4bit",
 }
 
-DEFAULT_MODEL = "mlx-community/Qwen2.5-VL-7B-Instruct-4bit"
+DEFAULT_MODEL = "mlx-community/Qwen3.5-9B-MLX-4bit"
 
 EXTRACTION_PROMPT = """Extract all text from this image as clean markdown.
 - Preserve tables as markdown tables

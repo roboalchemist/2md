@@ -37,8 +37,8 @@ def model_is_cached(model_id: str) -> bool:
 
 
 PARAKEET_MODEL = "mlx-community/parakeet-tdt-0.6b-v3"
-READERLM_MODEL = "mlx-community/ReaderLM-v2"
-QWEN_MODEL = "mlx-community/Qwen2.5-VL-7B-Instruct-4bit"
+READERLM_MODEL = "mlx-community/jinaai-ReaderLM-v2"
+QWEN_MODEL = "mlx-community/Qwen3.5-4B-MLX-4bit"
 
 
 # ---------------------------------------------------------------------------
