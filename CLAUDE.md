@@ -56,7 +56,7 @@ any2md/
 └── README.md
 ```
 
-**Total**: 8,700 lines of source code across 18 modules. 740 tests.
+**Total**: ~9,500 lines of source code across 18 modules. 766 tests.
 
 ## Key Libraries & Dependencies
 
@@ -103,8 +103,12 @@ Every converter module follows the same pattern:
 
 - `build_frontmatter(metadata: dict) -> str` — Hand-rolled YAML formatter (no PyYAML dep). Handles scalars, lists, nested dicts (chapters), multi-line strings (description via `|` block scalar), auto-quoting special chars.
 - `OutputFormat(str, Enum)` — `md`, `txt`
-- `setup_logging(verbose)` — Configures root logger
+- `setup_logging(verbose)` — Configures root logger to stderr explicitly
 - `write_output(content, path)` — File writer with parent dir creation
+- `write_json_output(metadata, content, source, converter, fields)` — JSON output to stdout for `--json` mode
+- `_filter_fields(data, fields_str)` — Dot-notation field selection for `--fields`
+- `write_json_error(code, message, recoverable)` — Structured JSON errors to stderr
+- `set_json_mode(enabled)` / `is_json_mode()` — Global JSON mode flag
 - `load_vlm(model)` — Stub for mlx-vlm loading
 
 ### Data Flow
@@ -153,7 +157,7 @@ python scripts/download_models.py --all
 ## Testing
 
 - **Framework**: unittest.TestCase classes, run via pytest
-- **Test count**: 740 collected tests
+- **Test count**: 766 collected tests
 - **Run all unit tests**: `python -m pytest tests/`
 - **Run specific**: `python -m pytest tests/test_csv.py -v`
 - **Slow tests** (real inference): `python -m pytest tests/test_inference.py -m slow -v -s`
@@ -179,19 +183,22 @@ any2md db <input> [--max-rows N] [--skip-views]
 any2md sub <input>
 any2md nb <input> [--no-outputs]
 
-# Common flags for all subcommands
+# Global flags (all subcommands)
+  --json, -j                # JSON output to stdout (agent-friendly)
+  --fields FIELDS           # Field selection for --json (dot-notation: frontmatter.rows,content)
+  --quiet, -q               # Suppress INFO logs
+  --version, -V             # Print version and exit
   -o, --output-dir PATH     # Output directory (default: cwd)
   -f, --format [md|txt]     # Output format (default: md)
   -v, --verbose             # DEBUG logging
+
+# Utility subcommands
+any2md deps                 # Show installed/missing optional dependencies
 ```
 
 ## Roadmap
 
-See [GOALS.md](GOALS.md) for the full expansion plan. Key areas:
-- Enhanced pdf2md with hybrid VLM fallback for scanned pages
-- Qwen3.5 as primary VLM (all sizes natively multimodal)
-- SmolDocling-256M for ultra-fast document extraction
-- Memory budget optimization for 36GB MacBook
+See [GOAL.md](GOAL.md) for current goals and phase status.
 
 ## Project History
 
