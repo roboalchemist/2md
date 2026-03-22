@@ -5,15 +5,22 @@ A toolkit for converting any media, document, or data format to markdown. AI inf
 ## Install
 
 ```bash
+# Homebrew (macOS)
+brew install roboalchemist/tap/any2md
+
 # From source
 git clone https://github.com/roboalchemist/any2md.git && cd any2md
 uv pip install -e '.[all]'
+```
 
-# Or install only what you need
-uv pip install -e '.[stt]'    # Audio/video transcription
-uv pip install -e '.[pdf]'    # PDF extraction
-uv pip install -e '.[img]'    # Image OCR via VLM
-uv pip install -e '.[web]'    # Web page conversion
+The base install includes all 8 zero-dependency converters (csv, data, db, nb, eml, org, tex, man). For AI-powered converters, add optional dependencies:
+
+```bash
+uv pip install "mlx-audio[stt]" yt-dlp   # Audio/video transcription
+uv pip install pymupdf4llm               # PDF extraction
+uv pip install mlx-vlm                   # Image OCR via VLM
+uv pip install mlx-lm httpx              # Web page conversion
+uv pip install markitdown                # Office documents
 
 # System dependency for audio/video
 brew install ffmpeg
