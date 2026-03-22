@@ -122,9 +122,13 @@ def app():
     """Main entry point — dispatches to subcommand or auto-detects."""
     args = sys.argv[1:]
 
-    if not args or args == ["--help"] or args == ["-h"]:
+    if args == ["--help"] or args == ["-h"]:
         _show_help()
         return
+
+    if not args:
+        _show_help()
+        raise SystemExit(2)
 
     if args == ["--version"] or args == ["-V"]:
         _show_version()
@@ -139,7 +143,8 @@ def app():
         if first not in tool_apps:
             typer.echo(f"Subcommand '{first}' not available. Install its dependencies first.", err=True)
             raise SystemExit(1)
-        tool_apps[first](standalone_mode=True)
+        # Pass args after the subcommand name (skip 'yt', 'csv', etc.)
+        tool_apps[first](args[1:], standalone_mode=True)
         return
 
     # Auto-detect from first arg
@@ -148,7 +153,8 @@ def app():
         if tool not in tool_apps:
             typer.echo(f"Detected '{tool}' converter but it's not installed. Install its dependencies.", err=True)
             raise SystemExit(1)
-        tool_apps[tool](standalone_mode=True)
+        # Pass all args — auto-detect, so first arg is the input file
+        tool_apps[tool](args, standalone_mode=True)
         return
 
     typer.echo(
@@ -157,7 +163,7 @@ def app():
         "Run 'any2md --help' for usage.",
         err=True,
     )
-    raise SystemExit(1)
+    raise SystemExit(2)
 
 
 def _show_version():

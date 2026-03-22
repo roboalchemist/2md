@@ -11,6 +11,7 @@ Contains shared code used across yt2md, pdf2md, and future tools:
 """
 
 import logging
+import sys
 from enum import Enum
 from pathlib import Path
 from typing import Dict
@@ -24,14 +25,25 @@ def setup_logging(verbose: bool = False) -> None:
     """
     Configure root logging. Call once at CLI startup.
 
+    All log output goes to stderr via an explicit StreamHandler so that
+    stdout remains clean for machine-readable data (file paths, etc.).
+
     Args:
         verbose: If True, set level to DEBUG; otherwise INFO.
     """
     level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-    )
+    root = logging.getLogger()
+    # Avoid adding duplicate handlers if called more than once
+    if root.handlers:
+        for handler in root.handlers:
+            handler.setLevel(level)
+        root.setLevel(level)
+        return
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setLevel(level)
+    handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    root.addHandler(handler)
+    root.setLevel(level)
 
 
 # ---------------------------------------------------------------------------
