@@ -163,6 +163,35 @@ def build_frontmatter(metadata: Dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# JSON mode state
+# ---------------------------------------------------------------------------
+
+_json_mode = False
+
+
+def set_json_mode(enabled: bool) -> None:
+    """Enable or disable JSON output mode globally."""
+    global _json_mode
+    _json_mode = enabled
+
+
+def is_json_mode() -> bool:
+    """Return True when --json flag is active."""
+    return _json_mode
+
+
+def write_json_error(code: str, message: str, recoverable: bool = False) -> None:
+    """Write structured JSON error to stderr for agent consumption."""
+    error = {
+        "code": code,
+        "message": message,
+        "recoverable": recoverable,
+    }
+    json.dump(error, sys.stderr, indent=2)
+    sys.stderr.write("\n")
+
+
+# ---------------------------------------------------------------------------
 # JSON output
 # ---------------------------------------------------------------------------
 

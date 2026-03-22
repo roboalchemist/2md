@@ -19,6 +19,9 @@ from any2md.common import (
     _filter_fields,
     build_frontmatter,
     write_json_output,
+    write_json_error,
+    set_json_mode,
+    is_json_mode,
 )
 
 
@@ -203,6 +206,101 @@ class TestWriteJsonOutput(unittest.TestCase):
         buf.seek(0)
         result = json.loads(buf.read())
         self.assertEqual(result["content"], unicode_content)
+
+
+# ---------------------------------------------------------------------------
+# write_json_error
+# ---------------------------------------------------------------------------
+
+class TestWriteJsonError(unittest.TestCase):
+    """Tests for write_json_error writing structured JSON errors to stderr."""
+
+    def _capture_error(self, code: str, message: str, recoverable: bool = False):
+        """Call write_json_error and return parsed JSON from captured stderr."""
+        buf = io.StringIO()
+        with patch("any2md.common.sys") as mock_sys:
+            mock_sys.stderr = buf
+            write_json_error(code, message, recoverable)
+        buf.seek(0)
+        return json.loads(buf.read())
+
+    def test_output_is_valid_json(self):
+        buf = io.StringIO()
+        with patch("any2md.common.sys") as mock_sys:
+            mock_sys.stderr = buf
+            write_json_error("FILE_NOT_FOUND", "File not found: /tmp/x.csv")
+        buf.seek(0)
+        parsed = json.loads(buf.read())
+        self.assertIsInstance(parsed, dict)
+
+    def test_output_ends_with_newline(self):
+        buf = io.StringIO()
+        with patch("any2md.common.sys") as mock_sys:
+            mock_sys.stderr = buf
+            write_json_error("FILE_NOT_FOUND", "msg")
+        self.assertTrue(buf.getvalue().endswith("\n"))
+
+    def test_schema_has_required_fields(self):
+        result = self._capture_error("FILE_NOT_FOUND", "not found")
+        self.assertIn("code", result)
+        self.assertIn("message", result)
+        self.assertIn("recoverable", result)
+
+    def test_code_field(self):
+        result = self._capture_error("FILE_NOT_FOUND", "not found")
+        self.assertEqual(result["code"], "FILE_NOT_FOUND")
+
+    def test_message_field(self):
+        result = self._capture_error("FILE_NOT_FOUND", "File not found: /tmp/x.csv")
+        self.assertEqual(result["message"], "File not found: /tmp/x.csv")
+
+    def test_recoverable_default_false(self):
+        result = self._capture_error("FILE_NOT_FOUND", "not found")
+        self.assertFalse(result["recoverable"])
+
+    def test_recoverable_true(self):
+        result = self._capture_error("MISSING_DEPENDENCY", "install dep", recoverable=True)
+        self.assertTrue(result["recoverable"])
+
+    def test_missing_dependency_code(self):
+        result = self._capture_error("MISSING_DEPENDENCY", "mlx-vlm required")
+        self.assertEqual(result["code"], "MISSING_DEPENDENCY")
+
+    def test_invalid_input_code(self):
+        result = self._capture_error("INVALID_INPUT", "not a CSV")
+        self.assertEqual(result["code"], "INVALID_INPUT")
+
+    def test_model_load_failed_code(self):
+        result = self._capture_error("MODEL_LOAD_FAILED", "model failed")
+        self.assertEqual(result["code"], "MODEL_LOAD_FAILED")
+
+
+# ---------------------------------------------------------------------------
+# set_json_mode / is_json_mode
+# ---------------------------------------------------------------------------
+
+class TestJsonMode(unittest.TestCase):
+    """Tests for the global JSON mode flag."""
+
+    def setUp(self):
+        # Ensure mode is reset before each test
+        set_json_mode(False)
+
+    def tearDown(self):
+        # Clean up after each test
+        set_json_mode(False)
+
+    def test_default_is_false(self):
+        self.assertFalse(is_json_mode())
+
+    def test_set_true(self):
+        set_json_mode(True)
+        self.assertTrue(is_json_mode())
+
+    def test_set_false(self):
+        set_json_mode(True)
+        set_json_mode(False)
+        self.assertFalse(is_json_mode())
 
 
 # ---------------------------------------------------------------------------

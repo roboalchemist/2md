@@ -26,7 +26,7 @@ from typing import Dict, List, Optional
 import typer
 from typing_extensions import Annotated
 
-from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output
+from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error
 
 # Configure logging
 logging.basicConfig(
@@ -378,11 +378,17 @@ def main(
     if input_path.is_dir():
         nb_files: List[Path] = sorted(input_path.glob("*.ipynb"))
         if not nb_files:
-            typer.echo(f"No .ipynb files found in {input_path}", err=True)
+            if is_json_mode():
+                write_json_error("FILE_NOT_FOUND", f"No .ipynb files found in {input_path}")
+            else:
+                typer.echo(f"No .ipynb files found in {input_path}", err=True)
             raise typer.Exit(1)
     else:
         if not input_path.exists():
-            typer.echo(f"File not found: {input_path}", err=True)
+            if is_json_mode():
+                write_json_error("FILE_NOT_FOUND", f"File not found: {input_path}")
+            else:
+                typer.echo(f"File not found: {input_path}", err=True)
             raise typer.Exit(1)
         nb_files = [input_path]
 

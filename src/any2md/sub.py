@@ -29,7 +29,7 @@ from typing import Dict, List, Optional, Tuple
 import typer
 from typing_extensions import Annotated
 
-from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output
+from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error
 from any2md.yt import format_timestamp_md
 
 # Configure logging
@@ -383,15 +383,21 @@ def main(
         for ext in SUBTITLE_EXTENSIONS:
             sub_files.extend(input_path.glob(f'*{ext}'))
         if not sub_files:
-            typer.echo(
-                f"No subtitle files (.srt/.vtt/.ass/.ssa) found in {input_path}",
-                err=True,
-            )
+            if is_json_mode():
+                write_json_error("FILE_NOT_FOUND", f"No subtitle files (.srt/.vtt/.ass/.ssa) found in {input_path}")
+            else:
+                typer.echo(
+                    f"No subtitle files (.srt/.vtt/.ass/.ssa) found in {input_path}",
+                    err=True,
+                )
             raise typer.Exit(1)
         sub_files = sorted(sub_files)
     else:
         if not input_path.exists():
-            typer.echo(f"File not found: {input_path}", err=True)
+            if is_json_mode():
+                write_json_error("FILE_NOT_FOUND", f"File not found: {input_path}")
+            else:
+                typer.echo(f"File not found: {input_path}", err=True)
             raise typer.Exit(1)
         sub_files = [input_path]
 

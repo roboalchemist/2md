@@ -28,7 +28,7 @@ from typing import Dict, Optional, Tuple
 import typer
 from typing_extensions import Annotated
 
-from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output
+from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error
 
 # Configure logging (will be overridden by setup_logging in main)
 logging.basicConfig(
@@ -418,7 +418,14 @@ def main(
     logger.info("Extracted metadata: title=%s", metadata.get("title", "<none>"))
 
     # Load model
-    reader_model, tokenizer = load_reader_model(model)
+    try:
+        reader_model, tokenizer = load_reader_model(model)
+    except ImportError as exc:
+        if is_json_mode():
+            write_json_error("MISSING_DEPENDENCY", str(exc))
+        else:
+            logger.error("%s", exc)
+        raise typer.Exit(code=1)
 
     # Convert HTML to markdown
     markdown_content = html_to_markdown(html, model=reader_model, tokenizer=tokenizer)

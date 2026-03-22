@@ -26,7 +26,14 @@ from typing import List, Optional
 import typer
 from typing_extensions import Annotated
 
-from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output
+from any2md.common import (
+    build_frontmatter,
+    setup_logging,
+    OutputFormat,
+    write_output,
+    is_json_mode,
+    write_json_error,
+)
 
 # Import shared ReaderLM functions from any2md.web to avoid code duplication
 from any2md.web import load_reader_model, html_to_markdown, DEFAULT_MODEL, page_to_markdown, page_to_text
@@ -246,9 +253,12 @@ def main(
             list(input_path.glob("*.html")) + list(input_path.glob("*.htm"))
         )
         if not html_files:
-            typer.echo(
-                f"No .html or .htm files found in {input_path}", err=True
-            )
+            if is_json_mode():
+                write_json_error("FILE_NOT_FOUND", f"No .html or .htm files found in {input_path}")
+            else:
+                typer.echo(
+                    f"No .html or .htm files found in {input_path}", err=True
+                )
             raise typer.Exit(1)
         logger.info("Batch mode: found %d HTML files in %s", len(html_files), input_path)
     elif input_path.is_file():
@@ -259,7 +269,10 @@ def main(
             )
         html_files = [input_path]
     else:
-        typer.echo(f"Input path does not exist: {input_path}", err=True)
+        if is_json_mode():
+            write_json_error("FILE_NOT_FOUND", f"Input path does not exist: {input_path}")
+        else:
+            typer.echo(f"Input path does not exist: {input_path}", err=True)
         raise typer.Exit(1)
 
     output_dir_path = Path(output_dir)

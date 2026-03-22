@@ -26,7 +26,7 @@ from typing import Dict, List, Optional, Tuple
 import typer
 from typing_extensions import Annotated
 
-from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output
+from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error
 
 # Configure logging
 logging.basicConfig(
@@ -745,12 +745,18 @@ def main(
     if input_path.is_dir():
         tex_files: List[Path] = list(input_path.glob("*.tex"))
         if not tex_files:
-            typer.echo(f"No .tex files found in {input_path}", err=True)
+            if is_json_mode():
+                write_json_error("FILE_NOT_FOUND", f"No .tex files found in {input_path}")
+            else:
+                typer.echo(f"No .tex files found in {input_path}", err=True)
             raise typer.Exit(1)
         tex_files = sorted(tex_files)
     else:
         if not input_path.exists():
-            typer.echo(f"File not found: {input_path}", err=True)
+            if is_json_mode():
+                write_json_error("FILE_NOT_FOUND", f"File not found: {input_path}")
+            else:
+                typer.echo(f"File not found: {input_path}", err=True)
             raise typer.Exit(1)
         tex_files = [input_path]
 
