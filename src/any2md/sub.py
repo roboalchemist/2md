@@ -29,7 +29,7 @@ from typing import Dict, List, Optional, Tuple
 import typer
 from typing_extensions import Annotated
 
-from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error
+from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error, write_json_output
 from any2md.yt import format_timestamp_md
 
 # Configure logging
@@ -366,6 +366,14 @@ def main(
         "--verbose", "-v",
         help="Enable verbose (DEBUG) logging.",
     )] = False,
+    json_output: Annotated[bool, typer.Option(
+        "--json", "-j",
+        help="Output as JSON to stdout instead of writing a file.",
+    )] = False,
+    fields: Annotated[Optional[str], typer.Option(
+        "--fields",
+        help="Comma-separated dot-notation fields to include in JSON output (e.g. 'frontmatter,content').",
+    )] = None,
 ) -> None:
     """
     Convert subtitle files to markdown (default) or plain text.
@@ -402,6 +410,29 @@ def main(
         sub_files = [input_path]
 
     fmt = format.value
+
+    if json_output or is_json_mode():
+        import json as _json
+        if len(sub_files) == 1:
+            sub_file = sub_files[0]
+            subs = load_subtitles(sub_file)
+            metadata = extract_subtitle_metadata(subs, sub_file)
+            md_content = subs_to_markdown(subs)
+            write_json_output(metadata, md_content, sub_file, "sub", fields)
+        else:
+            results = []
+            for sub_file in sub_files:
+                subs = load_subtitles(sub_file)
+                metadata = extract_subtitle_metadata(subs, sub_file)
+                md_content = subs_to_markdown(subs)
+                results.append({
+                    "source": str(sub_file), "converter": "sub",
+                    "frontmatter": metadata, "content": md_content,
+                })
+            _json.dump(results, sys.stdout, indent=2, default=str)
+            sys.stdout.write("\n")
+        return
+
     for sub_file in sub_files:
         out = process_sub_file(sub_file, output_dir, fmt)
         typer.echo(f"Written: {out}", err=True)

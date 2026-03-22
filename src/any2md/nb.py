@@ -26,7 +26,7 @@ from typing import Dict, List, Optional
 import typer
 from typing_extensions import Annotated
 
-from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error
+from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error, write_json_output
 
 # Configure logging
 logging.basicConfig(
@@ -365,6 +365,14 @@ def main(
         "--verbose", "-v",
         help="Enable verbose (DEBUG) logging.",
     )] = False,
+    json_output: Annotated[bool, typer.Option(
+        "--json", "-j",
+        help="Output as JSON to stdout instead of writing a file.",
+    )] = False,
+    fields: Annotated[Optional[str], typer.Option(
+        "--fields",
+        help="Comma-separated dot-notation fields to include in JSON output (e.g. 'frontmatter,content').",
+    )] = None,
 ) -> None:
     """
     Convert Jupyter notebooks to markdown (default) or plain text.
@@ -394,6 +402,35 @@ def main(
 
     fmt = format.value
     include_outputs = not no_outputs
+
+    if json_output or is_json_mode():
+        import json as _json
+        if len(nb_files) == 1:
+            nb_file = nb_files[0]
+            nb_text = nb_file.read_text(encoding='utf-8', errors='replace')
+            nb = _json.loads(nb_text)
+            metadata = extract_nb_metadata(nb, nb_file)
+            kernel_language = metadata.get("kernel_language", "python")
+            md_content = notebook_to_markdown(nb, kernel_language=kernel_language,
+                                              include_outputs=include_outputs)
+            write_json_output(metadata, md_content, nb_file, "nb", fields)
+        else:
+            results = []
+            for nb_file in nb_files:
+                nb_text = nb_file.read_text(encoding='utf-8', errors='replace')
+                nb = _json.loads(nb_text)
+                metadata = extract_nb_metadata(nb, nb_file)
+                kernel_language = metadata.get("kernel_language", "python")
+                md_content = notebook_to_markdown(nb, kernel_language=kernel_language,
+                                                  include_outputs=include_outputs)
+                results.append({
+                    "source": str(nb_file), "converter": "nb",
+                    "frontmatter": metadata, "content": md_content,
+                })
+            _json.dump(results, sys.stdout, indent=2, default=str)
+            sys.stdout.write("\n")
+        return
+
     for nb_file in nb_files:
         out = process_nb_file(nb_file, output_dir, fmt,
                               include_outputs=include_outputs)

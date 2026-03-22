@@ -32,6 +32,7 @@ from any2md.common import (
     write_output,
     is_json_mode,
     write_json_error,
+    write_json_output,
 )
 
 # Configure logging
@@ -521,6 +522,14 @@ def main(
         "--verbose", "-v",
         help="Enable verbose (DEBUG) logging.",
     )] = False,
+    json_output: Annotated[bool, typer.Option(
+        "--json", "-j",
+        help="Output as JSON to stdout instead of writing a file.",
+    )] = False,
+    fields: Annotated[Optional[str], typer.Option(
+        "--fields",
+        help="Comma-separated dot-notation fields to include in JSON output (e.g. 'frontmatter,content').",
+    )] = None,
 ) -> None:
     """
     Convert a SQLite database to markdown (default) or plain text.
@@ -537,6 +546,16 @@ def main(
         else:
             typer.echo(f"File not found: {input_path}", err=True)
         raise typer.Exit(1)
+
+    if json_output or is_json_mode():
+        metadata, body = extract_db_info(
+            input_path,
+            max_rows=max_rows,
+            max_tables=max_tables,
+            include_views=not skip_views,
+        )
+        write_json_output(metadata, body, input_path, "db", fields)
+        return
 
     out = process_db_file(
         db_path=input_path,

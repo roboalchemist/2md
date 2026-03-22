@@ -26,7 +26,7 @@ from typing import Dict, List, Optional, Tuple
 import typer
 from typing_extensions import Annotated
 
-from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error
+from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error, write_json_output
 
 # Configure logging
 logging.basicConfig(
@@ -732,6 +732,14 @@ def main(
         "--verbose", "-v",
         help="Enable verbose (DEBUG) logging.",
     )] = False,
+    json_output: Annotated[bool, typer.Option(
+        "--json", "-j",
+        help="Output as JSON to stdout instead of writing a file.",
+    )] = False,
+    fields: Annotated[Optional[str], typer.Option(
+        "--fields",
+        help="Comma-separated dot-notation fields to include in JSON output (e.g. 'frontmatter,content').",
+    )] = None,
 ) -> None:
     """
     Convert LaTeX files to markdown (default) or plain text.
@@ -761,6 +769,29 @@ def main(
         tex_files = [input_path]
 
     fmt = format.value
+
+    if json_output or is_json_mode():
+        import json as _json
+        if len(tex_files) == 1:
+            tex_file = tex_files[0]
+            tex_content = tex_file.read_text(encoding='utf-8', errors='replace')
+            metadata, _ = extract_tex_metadata(tex_content, tex_file)
+            md_content = tex_to_markdown_text(tex_content)
+            write_json_output(metadata, md_content, tex_file, "tex", fields)
+        else:
+            results = []
+            for tex_file in tex_files:
+                tex_content = tex_file.read_text(encoding='utf-8', errors='replace')
+                metadata, _ = extract_tex_metadata(tex_content, tex_file)
+                md_content = tex_to_markdown_text(tex_content)
+                results.append({
+                    "source": str(tex_file), "converter": "tex",
+                    "frontmatter": metadata, "content": md_content,
+                })
+            _json.dump(results, sys.stdout, indent=2, default=str)
+            sys.stdout.write("\n")
+        return
+
     for tex_file in tex_files:
         out = process_tex_file(tex_file, output_dir, fmt)
         typer.echo(f"Written: {out}", err=True)

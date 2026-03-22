@@ -36,7 +36,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from any2md.common import build_frontmatter, is_json_mode, write_json_error
+from any2md.common import build_frontmatter, is_json_mode, write_json_error, write_json_output
 
 # fitz (PyMuPDF) — loaded at module level so tests can patch pdf2md.fitz.
 # Falls back gracefully if not installed; ImportError is raised at call time.
@@ -481,6 +481,14 @@ def main(
         "--verbose", "-v",
         help="Enable verbose (DEBUG) logging.",
     )] = False,
+    json_output: Annotated[bool, typer.Option(
+        "--json", "-j",
+        help="Output as JSON to stdout instead of writing a file.",
+    )] = False,
+    fields: Annotated[Optional[str], typer.Option(
+        "--fields",
+        help="Comma-separated dot-notation fields to include in JSON output (e.g. 'frontmatter,content').",
+    )] = None,
 ):
     """
     Extract text from a PDF file to markdown (default) or plain text.
@@ -567,6 +575,14 @@ def main(
         text_count = len(extracted) - ocr_count
         logger.info("Pages via VLM: %d, via text extraction: %d", ocr_count, text_count)
 
+    title = metadata.get('title') or os.path.splitext(os.path.basename(pdf_path))[0]
+
+    if json_output or is_json_mode():
+        content = pages_to_markdown(extracted, metadata=metadata, title=title)
+        from pathlib import Path as _Path
+        write_json_output(metadata, content, _Path(pdf_path), "pdf", fields)
+        return
+
     # Determine output filename
     output_dir_str = str(output_dir)
     os.makedirs(output_dir_str, exist_ok=True)
@@ -575,7 +591,6 @@ def main(
     output_file = os.path.join(output_dir_str, f"{base_name}.{ext}")
 
     # Format output
-    title = metadata.get('title') or base_name
     if format == OutputFormat.md:
         content = pages_to_markdown(extracted, metadata=metadata, title=title)
     else:

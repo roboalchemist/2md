@@ -35,6 +35,7 @@ from any2md.common import (
     write_output,
     is_json_mode,
     write_json_error,
+    write_json_output,
 )
 
 # Configure logging
@@ -425,6 +426,14 @@ def main(
         "--verbose", "-v",
         help="Enable verbose (DEBUG) logging.",
     )] = False,
+    json_output: Annotated[bool, typer.Option(
+        "--json", "-j",
+        help="Output as JSON to stdout instead of writing a file.",
+    )] = False,
+    fields: Annotated[Optional[str], typer.Option(
+        "--fields",
+        help="Comma-separated dot-notation fields to include in JSON output (e.g. 'frontmatter,content').",
+    )] = None,
 ) -> None:
     """
     Convert CSV/TSV files to markdown pipe tables (default) or plain aligned text.
@@ -458,6 +467,49 @@ def main(
         csv_files = [input_path]
 
     fmt = format.value
+
+    if json_output or is_json_mode():
+        import json as _json
+        if len(csv_files) == 1:
+            csv_file = csv_files[0]
+            file_content = csv_file.read_text(encoding="utf-8", errors="replace")
+            if file_content.strip():
+                delim = detect_delimiter(file_content)
+                headers, all_rows = parse_csv(file_content, delim)
+                total_rows = len(all_rows)
+                san_headers, san_rows, truncated = prepare_table(
+                    headers, all_rows, effective_max_rows, max_col_width
+                )
+                meta = extract_csv_metadata(csv_file, headers, all_rows, delim)
+                content = table_to_markdown(san_headers, san_rows, truncated, total_rows)
+            else:
+                meta = {}
+                content = ""
+            write_json_output(meta, content, csv_file, "csv", fields)
+        else:
+            results = []
+            for csv_file in csv_files:
+                file_content = csv_file.read_text(encoding="utf-8", errors="replace")
+                if file_content.strip():
+                    delim = detect_delimiter(file_content)
+                    headers, all_rows = parse_csv(file_content, delim)
+                    total_rows = len(all_rows)
+                    san_headers, san_rows, truncated = prepare_table(
+                        headers, all_rows, effective_max_rows, max_col_width
+                    )
+                    meta = extract_csv_metadata(csv_file, headers, all_rows, delim)
+                    content = table_to_markdown(san_headers, san_rows, truncated, total_rows)
+                else:
+                    meta = {}
+                    content = ""
+                results.append({
+                    "source": str(csv_file), "converter": "csv",
+                    "frontmatter": meta, "content": content,
+                })
+            _json.dump(results, sys.stdout, indent=2, default=str)
+            sys.stdout.write("\n")
+        return
+
     for csv_file in csv_files:
         out = process_csv_file(csv_file, output_dir, fmt, effective_max_rows, max_col_width)
         typer.echo(f"Written: {out}", err=True)

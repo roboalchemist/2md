@@ -26,7 +26,7 @@ from typing import Dict, List, Optional
 import typer
 from typing_extensions import Annotated
 
-from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error
+from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error, write_json_output
 
 # Configure logging
 logging.basicConfig(
@@ -361,6 +361,14 @@ def main(
         "--verbose", "-v",
         help="Enable verbose (DEBUG) logging.",
     )] = False,
+    json_output: Annotated[bool, typer.Option(
+        "--json", "-j",
+        help="Output as JSON to stdout instead of writing a file.",
+    )] = False,
+    fields: Annotated[Optional[str], typer.Option(
+        "--fields",
+        help="Comma-separated dot-notation fields to include in JSON output (e.g. 'frontmatter,content').",
+    )] = None,
 ) -> None:
     """
     Convert reStructuredText files to markdown (default) or plain text.
@@ -392,6 +400,36 @@ def main(
         rst_files = [input_path]
 
     fmt = format.value
+
+    if json_output or is_json_mode():
+        import json as _json
+        if len(rst_files) == 1:
+            rst_file = rst_files[0]
+            rst_content = rst_file.read_text(encoding='utf-8', errors='replace')
+            metadata = extract_rst_metadata(rst_content, rst_file)
+            try:
+                md_content = rst_to_markdown_text(rst_content)
+            except RuntimeError as exc:
+                write_json_error("CONVERSION_FAILED", str(exc))
+                raise typer.Exit(1)
+            write_json_output(metadata, md_content, rst_file, "rst", fields)
+        else:
+            results = []
+            for rst_file in rst_files:
+                rst_content = rst_file.read_text(encoding='utf-8', errors='replace')
+                metadata = extract_rst_metadata(rst_content, rst_file)
+                try:
+                    md_content = rst_to_markdown_text(rst_content)
+                except RuntimeError:
+                    md_content = ""
+                results.append({
+                    "source": str(rst_file), "converter": "rst",
+                    "frontmatter": metadata, "content": md_content,
+                })
+            _json.dump(results, sys.stdout, indent=2, default=str)
+            sys.stdout.write("\n")
+        return
+
     for rst_file in rst_files:
         out = process_rst_file(rst_file, output_dir, fmt)
         typer.echo(f"Written: {out}", err=True)

@@ -28,7 +28,7 @@ from typing import Dict, Optional, Tuple
 import typer
 from typing_extensions import Annotated
 
-from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error
+from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error, write_json_output
 
 # Configure logging (will be overridden by setup_logging in main)
 logging.basicConfig(
@@ -398,6 +398,14 @@ def main(
         "--verbose", "-v",
         help="Enable verbose (DEBUG) logging.",
     )] = False,
+    json_output: Annotated[bool, typer.Option(
+        "--json", "-j",
+        help="Output as JSON to stdout instead of writing a file.",
+    )] = False,
+    fields: Annotated[Optional[str], typer.Option(
+        "--fields",
+        help="Comma-separated dot-notation fields to include in JSON output (e.g. 'frontmatter,content').",
+    )] = None,
 ) -> None:
     """
     Convert a web URL to markdown using ReaderLM-v2 (local MLX inference).
@@ -430,6 +438,10 @@ def main(
     # Convert HTML to markdown
     markdown_content = html_to_markdown(html, model=reader_model, tokenizer=tokenizer)
     logger.info("Generated %d chars of markdown", len(markdown_content))
+
+    if json_output or is_json_mode():
+        write_json_output(metadata, markdown_content, url, "web", fields)
+        return
 
     # Determine output filename
     output_dir_path = Path(output_dir)

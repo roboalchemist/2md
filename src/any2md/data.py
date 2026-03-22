@@ -37,6 +37,7 @@ from any2md.common import (
     write_output,
     is_json_mode,
     write_json_error,
+    write_json_output,
 )
 
 logging.basicConfig(
@@ -532,6 +533,14 @@ def main(
         "--verbose", "-v",
         help="Enable verbose (DEBUG) logging.",
     )] = False,
+    json_output: Annotated[bool, typer.Option(
+        "--json", "-j",
+        help="Output as JSON to stdout instead of writing a file.",
+    )] = False,
+    fields: Annotated[Optional[str], typer.Option(
+        "--fields",
+        help="Comma-separated dot-notation fields to include in JSON output (e.g. 'frontmatter,content').",
+    )] = None,
 ) -> None:
     """
     Convert a JSON, YAML, or JSONL file to markdown (default) or plain text.
@@ -570,6 +579,18 @@ def main(
         else:
             typer.echo(str(exc), err=True)
         raise typer.Exit(1)
+
+    if json_output or is_json_mode():
+        data_fmt = detect_format(input_path)
+        try:
+            data, raw_text = load_data(input_path, data_fmt)
+        except (ValueError, ImportError) as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1)
+        metadata = extract_data_metadata(input_path, data, raw_text, data_fmt)
+        content = data_to_markdown(data, metadata, data_fmt, max_items)
+        write_json_output(metadata, content, input_path, "data", fields)
+        return
 
     out = process_data_file(input_path, output_dir, format.value, max_items)
     typer.echo(f"Written: {out}", err=True)

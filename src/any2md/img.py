@@ -27,7 +27,7 @@ from typing import List, Optional, Tuple
 import typer
 from typing_extensions import Annotated
 
-from any2md.common import build_frontmatter, setup_logging, write_output, is_json_mode, write_json_error
+from any2md.common import build_frontmatter, setup_logging, write_output, is_json_mode, write_json_error, write_json_output
 
 # mlx-vlm imports — loaded at module level so tests can patch img2md.generate etc.
 # Falls back gracefully if mlx-vlm is not installed; ImportError is raised at call time.
@@ -340,6 +340,14 @@ def main(
         "--verbose", "-v",
         help="Enable verbose (DEBUG) logging.",
     )] = False,
+    json_output: Annotated[bool, typer.Option(
+        "--json", "-j",
+        help="Output as JSON to stdout instead of writing a file.",
+    )] = False,
+    fields: Annotated[Optional[str], typer.Option(
+        "--fields",
+        help="Comma-separated dot-notation fields to include in JSON output (e.g. 'frontmatter,content').",
+    )] = None,
 ):
     """
     Convert images to markdown (default) or plain text using a local VLM.
@@ -407,6 +415,32 @@ def main(
         else:
             logger.error("Failed to load model '%s': %s", resolved_model, exc)
         raise typer.Exit(code=1)
+
+    if json_output or is_json_mode():
+        import json as _json
+        if len(images) == 1:
+            image_path = images[0]
+            metadata = get_image_metadata(image_path, resolved_model)
+            raw_text = image_to_markdown_text(
+                image_path, vlm_model, processor, config, resolved_model,
+                prompt=prompt, max_tokens=max_tokens,
+            )
+            write_json_output(metadata, raw_text, image_path, "img", fields)
+        else:
+            results = []
+            for image_path in images:
+                metadata = get_image_metadata(image_path, resolved_model)
+                raw_text = image_to_markdown_text(
+                    image_path, vlm_model, processor, config, resolved_model,
+                    prompt=prompt, max_tokens=max_tokens,
+                )
+                results.append({
+                    "source": str(image_path), "converter": "img",
+                    "frontmatter": metadata, "content": raw_text,
+                })
+            _json.dump(results, sys.stdout, indent=2, default=str)
+            sys.stdout.write("\n")
+        return
 
     output_paths = []
     failed = []

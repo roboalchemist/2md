@@ -38,7 +38,7 @@ from typing import Dict, List, Optional, Tuple
 import typer
 from typing_extensions import Annotated
 
-from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error
+from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error, write_json_output
 
 # Configure logging
 logging.basicConfig(
@@ -636,6 +636,14 @@ def main(
         "--verbose", "-v",
         help="Enable verbose (DEBUG) logging.",
     )] = False,
+    json_output: Annotated[bool, typer.Option(
+        "--json", "-j",
+        help="Output as JSON to stdout instead of writing a file.",
+    )] = False,
+    fields: Annotated[Optional[str], typer.Option(
+        "--fields",
+        help="Comma-separated dot-notation fields to include in JSON output (e.g. 'frontmatter,content').",
+    )] = None,
 ) -> None:
     """
     Convert Org-mode files to markdown (default) or plain text.
@@ -664,6 +672,29 @@ def main(
         org_files = [input_path]
 
     fmt = format.value
+
+    if json_output or is_json_mode():
+        import json as _json
+        if len(org_files) == 1:
+            org_file = org_files[0]
+            org_content = org_file.read_text(encoding='utf-8', errors='replace')
+            metadata = extract_org_metadata(org_content, org_file)
+            md_body = org_to_markdown_text(org_content)
+            write_json_output(metadata, md_body, org_file, "org", fields)
+        else:
+            results = []
+            for org_file in org_files:
+                org_content = org_file.read_text(encoding='utf-8', errors='replace')
+                metadata = extract_org_metadata(org_content, org_file)
+                md_body = org_to_markdown_text(org_content)
+                results.append({
+                    "source": str(org_file), "converter": "org",
+                    "frontmatter": metadata, "content": md_body,
+                })
+            _json.dump(results, sys.stdout, indent=2, default=str)
+            sys.stdout.write("\n")
+        return
+
     for org_file in org_files:
         out = process_org_file(org_file, output_dir, fmt)
         typer.echo(f"Written: {out}", err=True)

@@ -19,6 +19,7 @@ Examples:
 
 import logging
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
@@ -33,6 +34,7 @@ from any2md.common import (
     write_output,
     is_json_mode,
     write_json_error,
+    write_json_output,
 )
 
 # Import shared ReaderLM functions from any2md.web to avoid code duplication
@@ -235,6 +237,14 @@ def main(
         "--verbose", "-v",
         help="Enable verbose (DEBUG) logging.",
     )] = False,
+    json_output: Annotated[bool, typer.Option(
+        "--json", "-j",
+        help="Output as JSON to stdout instead of writing a file.",
+    )] = False,
+    fields: Annotated[Optional[str], typer.Option(
+        "--fields",
+        help="Comma-separated dot-notation fields to include in JSON output (e.g. 'frontmatter,content').",
+    )] = None,
 ) -> None:
     """
     Convert local HTML files to markdown using ReaderLM-v2 (local MLX inference).
@@ -279,6 +289,34 @@ def main(
 
     # Load model once for all files
     reader_model, tokenizer = load_reader_model(model)
+
+    if json_output or is_json_mode():
+        import json as _json
+        if len(html_files) == 1:
+            html_file = html_files[0]
+            html = html_file.read_text(encoding='utf-8', errors='replace')
+            metadata = extract_meta_tags(html)
+            metadata['source'] = str(html_file.resolve())
+            metadata['fetched_at'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+            md_content = html_to_markdown(html, model=reader_model, tokenizer=tokenizer)
+            write_json_output(metadata, md_content, html_file, "html", fields)
+        else:
+            results = []
+            for html_file in html_files:
+                html = html_file.read_text(encoding='utf-8', errors='replace')
+                metadata = extract_meta_tags(html)
+                metadata['source'] = str(html_file.resolve())
+                metadata['fetched_at'] = __import__('datetime').datetime.now(
+                    __import__('datetime').timezone.utc
+                ).strftime('%Y-%m-%dT%H:%M:%SZ')
+                md_content = html_to_markdown(html, model=reader_model, tokenizer=tokenizer)
+                results.append({
+                    "source": str(html_file), "converter": "html",
+                    "frontmatter": metadata, "content": md_content,
+                })
+            _json.dump(results, sys.stdout, indent=2, default=str)
+            sys.stdout.write("\n")
+        return
 
     # Process each file
     for html_file in html_files:

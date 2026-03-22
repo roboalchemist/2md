@@ -26,7 +26,7 @@ from typing import Dict, Optional
 import typer
 from typing_extensions import Annotated
 
-from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error
+from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error, write_json_output
 
 # Configure logging
 logging.basicConfig(
@@ -273,6 +273,14 @@ def main(
         "--verbose", "-v",
         help="Enable verbose (DEBUG) logging.",
     )] = False,
+    json_output: Annotated[bool, typer.Option(
+        "--json", "-j",
+        help="Output as JSON to stdout instead of writing a file.",
+    )] = False,
+    fields: Annotated[Optional[str], typer.Option(
+        "--fields",
+        help="Comma-separated dot-notation fields to include in JSON output (e.g. 'frontmatter,content').",
+    )] = None,
 ) -> None:
     """
     Convert an office document to markdown (default) or plain text.
@@ -322,6 +330,10 @@ def main(
         raise typer.Exit(code=1)
 
     logger.info("Conversion complete (%d chars)", len(content))
+
+    if json_output or is_json_mode():
+        write_json_output(metadata, content, doc_path, "doc", fields)
+        return
 
     # Determine output filename
     os.makedirs(str(output_dir), exist_ok=True)

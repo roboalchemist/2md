@@ -36,7 +36,7 @@ from typing import Dict, List, Optional, Tuple
 import typer
 from typing_extensions import Annotated
 
-from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error
+from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error, write_json_output
 
 logging.basicConfig(
     level=logging.INFO,
@@ -468,6 +468,14 @@ def main(
         "--verbose", "-v",
         help="Enable verbose (DEBUG) logging.",
     )] = False,
+    json_output: Annotated[bool, typer.Option(
+        "--json", "-j",
+        help="Output as JSON to stdout instead of writing a file.",
+    )] = False,
+    fields: Annotated[Optional[str], typer.Option(
+        "--fields",
+        help="Comma-separated dot-notation fields to include in JSON output (e.g. 'frontmatter,content').",
+    )] = None,
 ) -> None:
     """
     Convert email files to markdown (default) or plain text.
@@ -487,6 +495,30 @@ def main(
 
     fmt = format.value
     suffix = input_path.suffix.lower()
+
+    if json_output or is_json_mode():
+        import json as _json
+        if suffix == '.mbox':
+            results = []
+            mbox_obj = mailbox.mbox(str(input_path))
+            for msg in list(mbox_obj):
+                metadata = extract_email_metadata(msg, input_path)
+                body, attachments = _extract_body_and_attachments(msg)
+                if attachments:
+                    metadata['attachments'] = attachments
+                results.append({"source": str(input_path), "converter": "eml",
+                                 "frontmatter": metadata, "content": body})
+            _json.dump(results, sys.stdout, indent=2, default=str)
+            sys.stdout.write("\n")
+        else:
+            raw = input_path.read_bytes()
+            msg = email.message_from_bytes(raw, policy=email.policy.compat32)
+            metadata = extract_email_metadata(msg, input_path)
+            body, attachments = _extract_body_and_attachments(msg)
+            if attachments:
+                metadata['attachments'] = attachments
+            write_json_output(metadata, body, input_path, "eml", fields)
+        return
 
     if suffix == '.mbox':
         written = process_mbox_file(input_path, output_dir, fmt)

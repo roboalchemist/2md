@@ -39,7 +39,7 @@ import logging
 import typer
 from typing_extensions import Annotated
 
-from any2md.common import build_frontmatter  # noqa: F401 — re-exported for backward compat
+from any2md.common import build_frontmatter, is_json_mode, write_json_output  # noqa: F401 — build_frontmatter re-exported for backward compat
 
 # Configure logging
 logging.basicConfig(
@@ -790,6 +790,14 @@ def main(
         "--verbose", "-v",
         help="Enable verbose (DEBUG) logging.",
     )] = False,
+    json_output: Annotated[bool, typer.Option(
+        "--json", "-j",
+        help="Output as JSON to stdout instead of writing a file.",
+    )] = False,
+    fields: Annotated[Optional[str], typer.Option(
+        "--fields",
+        help="Comma-separated dot-notation fields to include in JSON output (e.g. 'frontmatter,content').",
+    )] = None,
 ):
     """
     Transcribe audio to markdown (default), SRT, or plain text.
@@ -835,6 +843,12 @@ def main(
             )
 
             logger.info(f"Transcription completed successfully. Output saved to: {output_file}")
+
+            if json_output or is_json_mode():
+                from pathlib import Path as _Path
+                content = _Path(output_file).read_text(encoding='utf-8')
+                fm = metadata or {}
+                write_json_output(fm, content, input, "yt", fields)
 
         except Exception as e:
             logger.error(f"Error: {str(e)}")

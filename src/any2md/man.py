@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple
 import typer
 from typing_extensions import Annotated
 
-from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error
+from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error, write_json_output
 
 # Configure logging
 logging.basicConfig(
@@ -694,6 +694,14 @@ def main(
         "--verbose", "-v",
         help="Enable verbose (DEBUG) logging.",
     )] = False,
+    json_output: Annotated[bool, typer.Option(
+        "--json", "-j",
+        help="Output as JSON to stdout instead of writing a file.",
+    )] = False,
+    fields: Annotated[Optional[str], typer.Option(
+        "--fields",
+        help="Comma-separated dot-notation fields to include in JSON output (e.g. 'frontmatter,content').",
+    )] = None,
 ) -> None:
     """
     Convert Unix man pages to markdown (default) or plain text.
@@ -728,6 +736,27 @@ def main(
         man_files = [input_path]
 
     fmt = format.value
+
+    if json_output or is_json_mode():
+        import json as _json
+        if len(man_files) == 1:
+            man_file = man_files[0]
+            metadata = extract_man_metadata(man_file)
+            md_content, _ = man_to_markdown_text(man_file)
+            write_json_output(metadata, md_content, man_file, "man", fields)
+        else:
+            results = []
+            for man_file in man_files:
+                metadata = extract_man_metadata(man_file)
+                md_content, _ = man_to_markdown_text(man_file)
+                results.append({
+                    "source": str(man_file), "converter": "man",
+                    "frontmatter": metadata, "content": md_content,
+                })
+            _json.dump(results, sys.stdout, indent=2, default=str)
+            sys.stdout.write("\n")
+        return
+
     for man_file in man_files:
         out = process_man_file(man_file, output_dir, fmt)
         typer.echo(f"Written: {out}", err=True)
