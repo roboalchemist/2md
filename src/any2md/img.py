@@ -27,7 +27,7 @@ from typing import List, Optional, Tuple
 import typer
 from typing_extensions import Annotated
 
-from any2md.common import build_frontmatter, setup_logging, write_output
+from any2md.common import build_frontmatter, setup_logging, write_output, is_json_mode, write_json_error
 
 # mlx-vlm imports — loaded at module level so tests can patch img2md.generate etc.
 # Falls back gracefully if mlx-vlm is not installed; ImportError is raised at call time.
@@ -351,29 +351,44 @@ def main(
     setup_logging(verbose)
 
     if not input_path.exists():
-        logger.error("Path not found: %s", input_path)
+        if is_json_mode():
+            write_json_error("FILE_NOT_FOUND", f"Path not found: {input_path}")
+        else:
+            logger.error("Path not found: %s", input_path)
         raise typer.Exit(code=1)
 
     # Collect images to process
     if input_path.is_dir():
         images = find_images_in_directory(input_path)
         if not images:
-            logger.error(
-                "No supported image files found in directory: %s", input_path
-            )
+            if is_json_mode():
+                write_json_error("FILE_NOT_FOUND", f"No supported image files found in directory: {input_path}")
+            else:
+                logger.error(
+                    "No supported image files found in directory: %s", input_path
+                )
             raise typer.Exit(code=1)
         logger.info("Found %d image(s) in: %s", len(images), input_path)
     elif input_path.is_file():
         if input_path.suffix.lower() not in SUPPORTED_FORMATS:
-            logger.error(
-                "Unsupported file format '%s'. Supported: %s",
-                input_path.suffix,
-                ", ".join(sorted(SUPPORTED_FORMATS)),
-            )
+            if is_json_mode():
+                write_json_error(
+                    "INVALID_INPUT",
+                    f"Unsupported file format '{input_path.suffix}'. Supported: {', '.join(sorted(SUPPORTED_FORMATS))}",
+                )
+            else:
+                logger.error(
+                    "Unsupported file format '%s'. Supported: %s",
+                    input_path.suffix,
+                    ", ".join(sorted(SUPPORTED_FORMATS)),
+                )
             raise typer.Exit(code=1)
         images = [input_path]
     else:
-        logger.error("Input is not a file or directory: %s", input_path)
+        if is_json_mode():
+            write_json_error("FILE_NOT_FOUND", f"Input is not a file or directory: {input_path}")
+        else:
+            logger.error("Input is not a file or directory: %s", input_path)
         raise typer.Exit(code=1)
 
     resolved_model = resolve_model(model)
@@ -382,10 +397,15 @@ def main(
     # Load model once, process all images
     try:
         vlm_model, processor, config = load_vlm_model(resolved_model)
-    except ImportError:
+    except ImportError as exc:
+        if is_json_mode():
+            write_json_error("MISSING_DEPENDENCY", str(exc))
         raise typer.Exit(code=1)
     except Exception as exc:
-        logger.error("Failed to load model '%s': %s", resolved_model, exc)
+        if is_json_mode():
+            write_json_error("MODEL_LOAD_FAILED", f"Failed to load model '{resolved_model}': {exc}")
+        else:
+            logger.error("Failed to load model '%s': %s", resolved_model, exc)
         raise typer.Exit(code=1)
 
     output_paths = []

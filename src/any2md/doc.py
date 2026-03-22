@@ -26,7 +26,7 @@ from typing import Dict, Optional
 import typer
 from typing_extensions import Annotated
 
-from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output
+from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error
 
 # Configure logging
 logging.basicConfig(
@@ -286,16 +286,25 @@ def main(
     doc_path = Path(os.path.abspath(input_file))
 
     if not doc_path.exists():
-        logger.error("File not found: %s", doc_path)
+        if is_json_mode():
+            write_json_error("FILE_NOT_FOUND", f"File not found: {doc_path}")
+        else:
+            logger.error("File not found: %s", doc_path)
         raise typer.Exit(code=1)
 
     fmt = detect_format(doc_path)
     if f".{fmt}" not in SUPPORTED_FORMATS:
-        logger.error(
-            "Unsupported file format: .%s (supported: %s)",
-            fmt,
-            ", ".join(sorted(SUPPORTED_FORMATS)),
-        )
+        if is_json_mode():
+            write_json_error(
+                "INVALID_INPUT",
+                f"Unsupported file format: .{fmt} (supported: {', '.join(sorted(SUPPORTED_FORMATS))})",
+            )
+        else:
+            logger.error(
+                "Unsupported file format: .%s (supported: %s)",
+                fmt,
+                ", ".join(sorted(SUPPORTED_FORMATS)),
+            )
         raise typer.Exit(code=1)
 
     # Extract metadata
@@ -306,7 +315,10 @@ def main(
     try:
         content = convert_document(doc_path)
     except ImportError as exc:
-        logger.error("%s", exc)
+        if is_json_mode():
+            write_json_error("MISSING_DEPENDENCY", str(exc))
+        else:
+            logger.error("%s", exc)
         raise typer.Exit(code=1)
 
     logger.info("Conversion complete (%d chars)", len(content))

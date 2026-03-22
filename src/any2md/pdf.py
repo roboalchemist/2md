@@ -36,7 +36,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from any2md.common import build_frontmatter
+from any2md.common import build_frontmatter, is_json_mode, write_json_error
 
 # fitz (PyMuPDF) — loaded at module level so tests can patch pdf2md.fitz.
 # Falls back gracefully if not installed; ImportError is raised at call time.
@@ -495,16 +495,25 @@ def main(
 
     pdf_path = os.path.abspath(input)
     if not os.path.exists(pdf_path):
-        logger.error(f"File not found: {pdf_path}")
+        if is_json_mode():
+            write_json_error("FILE_NOT_FOUND", f"File not found: {pdf_path}")
+        else:
+            logger.error(f"File not found: {pdf_path}")
         raise typer.Exit(code=1)
 
     if not pdf_path.lower().endswith('.pdf'):
-        logger.error(f"Not a PDF file: {pdf_path}")
+        if is_json_mode():
+            write_json_error("INVALID_INPUT", f"Not a PDF file: {pdf_path}")
+        else:
+            logger.error(f"Not a PDF file: {pdf_path}")
         raise typer.Exit(code=1)
 
     # Open document for metadata
     if fitz is None:
-        logger.error("PyMuPDF (fitz) is required. Install it with: pip install pymupdf")
+        if is_json_mode():
+            write_json_error("MISSING_DEPENDENCY", "PyMuPDF (fitz) is required. Install it with: pip install pymupdf")
+        else:
+            logger.error("PyMuPDF (fitz) is required. Install it with: pip install pymupdf")
         raise typer.Exit(code=1)
     doc = fitz.open(pdf_path)
     metadata = extract_pdf_metadata(doc)
@@ -529,10 +538,16 @@ def main(
         try:
             vlm_model_obj, vlm_processor, vlm_config = load_vlm_for_pdf(vlm_model)
         except ImportError as exc:
-            logger.error("Cannot load VLM for OCR: %s", exc)
+            if is_json_mode():
+                write_json_error("MISSING_DEPENDENCY", f"Cannot load VLM for OCR: {exc}")
+            else:
+                logger.error("Cannot load VLM for OCR: %s", exc)
             raise typer.Exit(code=1)
         except Exception as exc:
-            logger.error("Failed to load VLM model '%s': %s", vlm_model, exc)
+            if is_json_mode():
+                write_json_error("MODEL_LOAD_FAILED", f"Failed to load VLM model '{vlm_model}': {exc}")
+            else:
+                logger.error("Failed to load VLM model '%s': %s", vlm_model, exc)
             raise typer.Exit(code=1)
 
     # Extract (hybrid if OCR requested)

@@ -134,6 +134,16 @@ def app():
         _show_version()
         return
 
+    # Handle --json early: enable JSON mode and strip flag from args
+    if "--json" in args:
+        import logging
+        from any2md.common import set_json_mode
+        set_json_mode(True)
+        args = [a for a in args if a != "--json"]
+        # Suppress import-time log noise so stderr stays clean for JSON
+        logging.root.setLevel(logging.WARNING)
+        logging.getLogger("numexpr").setLevel(logging.WARNING)
+
     first = args[0]
 
     tool_apps = _get_tool_apps()

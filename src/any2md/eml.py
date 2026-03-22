@@ -36,7 +36,7 @@ from typing import Dict, List, Optional, Tuple
 import typer
 from typing_extensions import Annotated
 
-from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output
+from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error
 
 logging.basicConfig(
     level=logging.INFO,
@@ -479,7 +479,10 @@ def main(
     setup_logging(verbose)
 
     if not input_path.exists():
-        typer.echo(f"File not found: {input_path}", err=True)
+        if is_json_mode():
+            write_json_error("FILE_NOT_FOUND", f"File not found: {input_path}")
+        else:
+            typer.echo(f"File not found: {input_path}", err=True)
         raise typer.Exit(1)
 
     fmt = format.value

@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple
 import typer
 from typing_extensions import Annotated
 
-from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output
+from any2md.common import build_frontmatter, setup_logging, OutputFormat, write_output, is_json_mode, write_json_error
 
 # Configure logging
 logging.basicConfig(
@@ -712,12 +712,18 @@ def main(
         for ext in MAN_EXTENSIONS:
             man_files.extend(input_path.glob(f"*{ext}"))
         if not man_files:
-            typer.echo(f"No man page files (.1-.9) found in {input_path}", err=True)
+            if is_json_mode():
+                write_json_error("FILE_NOT_FOUND", f"No man page files (.1-.9) found in {input_path}")
+            else:
+                typer.echo(f"No man page files (.1-.9) found in {input_path}", err=True)
             raise typer.Exit(1)
         man_files = sorted(man_files)
     else:
         if not input_path.exists():
-            typer.echo(f"File not found: {input_path}", err=True)
+            if is_json_mode():
+                write_json_error("FILE_NOT_FOUND", f"File not found: {input_path}")
+            else:
+                typer.echo(f"File not found: {input_path}", err=True)
             raise typer.Exit(1)
         man_files = [input_path]
 
