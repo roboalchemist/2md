@@ -306,7 +306,6 @@ _model_help = (
 
 app = typer.Typer(
     help="Convert images to markdown using a local VLM (mlx-vlm).",
-    add_completion=False,
     rich_markup_mode="rich",
     no_args_is_help=True,
 )

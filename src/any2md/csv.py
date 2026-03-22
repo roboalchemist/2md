@@ -388,7 +388,6 @@ def process_csv_file(
 
 app = typer.Typer(
     help="Convert CSV/TSV files to markdown pipe tables or plain text.",
-    add_completion=False,
     rich_markup_mode="rich",
     no_args_is_help=True,
 )

@@ -443,7 +443,6 @@ class OutputFormat(str, Enum):
 
 app = typer.Typer(
     help="Extract text from PDFs to markdown or plain text using pymupdf4llm.",
-    add_completion=False,
     rich_markup_mode="rich",
     no_args_is_help=True,
 )

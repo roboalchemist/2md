@@ -251,7 +251,6 @@ def doc_to_text(content: str) -> str:
 
 app = typer.Typer(
     help="Convert office documents (DOCX, PPTX, XLSX, EPUB) to markdown using markitdown.",
-    add_completion=False,
     rich_markup_mode="rich",
     no_args_is_help=True,
 )

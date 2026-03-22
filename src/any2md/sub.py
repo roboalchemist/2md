@@ -344,7 +344,6 @@ def process_sub_file(sub_path: Path, output_dir: Path, fmt: str) -> Path:
 
 app = typer.Typer(
     help="Convert subtitle files (SRT/VTT/ASS) to markdown or plain text.",
-    add_completion=False,
     rich_markup_mode="rich",
     no_args_is_help=True,
 )

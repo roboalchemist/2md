@@ -372,7 +372,6 @@ def url_to_filename(url: str) -> str:
 
 app = typer.Typer(
     help="Convert a web URL to markdown using ReaderLM-v2 (local MLX inference).",
-    add_completion=False,
     rich_markup_mode="rich",
     no_args_is_help=True,
 )

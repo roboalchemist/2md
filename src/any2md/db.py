@@ -480,7 +480,6 @@ def process_db_file(
 
 app = typer.Typer(
     help="Convert a SQLite database to markdown or plain text.",
-    add_completion=False,
     rich_markup_mode="rich",
     no_args_is_help=True,
 )

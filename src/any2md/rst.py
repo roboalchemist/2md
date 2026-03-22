@@ -339,7 +339,6 @@ def process_rst_file(rst_path: Path, output_dir: Path, fmt: str) -> Path:
 
 app = typer.Typer(
     help="Convert reStructuredText (.rst) files to markdown or plain text.",
-    add_completion=False,
     rich_markup_mode="rich",
     no_args_is_help=True,
 )

@@ -748,7 +748,6 @@ _model_help = (
 
 app = typer.Typer(
     help="Transcribe YouTube videos, audio, or video files to markdown, SRT, or plain text using mlx-audio (Parakeet).",
-    add_completion=False,
     rich_markup_mode="rich",
     no_args_is_help=True,
 )

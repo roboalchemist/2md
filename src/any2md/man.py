@@ -672,7 +672,6 @@ def process_man_file(man_path: Path, output_dir: Path, fmt: str) -> Path:
 
 app = typer.Typer(
     help="Convert Unix man pages to markdown or plain text.",
-    add_completion=False,
     rich_markup_mode="rich",
     no_args_is_help=True,
 )

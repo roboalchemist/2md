@@ -339,7 +339,6 @@ def process_nb_file(nb_path: Path, output_dir: Path, fmt: str,
 
 app = typer.Typer(
     help="Convert Jupyter notebooks (.ipynb) to markdown or plain text.",
-    add_completion=False,
     rich_markup_mode="rich",
     no_args_is_help=True,
 )

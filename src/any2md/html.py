@@ -202,7 +202,6 @@ def process_html_file(
 
 app = typer.Typer(
     help="Convert local HTML files to markdown using ReaderLM-v2 (local MLX inference).",
-    add_completion=False,
     rich_markup_mode="rich",
     no_args_is_help=True,
 )

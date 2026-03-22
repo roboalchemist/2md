@@ -499,7 +499,6 @@ def process_data_file(
 
 app = typer.Typer(
     help="Convert JSON / YAML / JSONL files to markdown or plain text.",
-    add_completion=False,
     rich_markup_mode="rich",
     no_args_is_help=True,
 )

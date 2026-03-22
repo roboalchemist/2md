@@ -446,7 +446,6 @@ def process_mbox_file(
 
 app = typer.Typer(
     help="Convert email files (.eml / .mbox) to markdown or plain text.",
-    add_completion=False,
     rich_markup_mode="rich",
     no_args_is_help=True,
 )
