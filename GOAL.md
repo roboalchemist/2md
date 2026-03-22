@@ -10,7 +10,7 @@ any2md converts any file format to clean markdown with YAML frontmatter. 18 conv
 
 --version, --json, --quiet, NO_COLOR, structured errors, stdout/stderr separation, shell completions, llms.txt, Makefile, Homebrew formula, Claude skill, trckr project.
 
-## Phase 3 — Quality & Polish 🔄 IN PROGRESS
+## Phase 3 — Quality & Polish ✅ DONE
 
 ### 3A — Fix pre-existing test failures
 ### 3B — Brew formula dependency UX (ANY2-9)

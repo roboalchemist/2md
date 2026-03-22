@@ -1,5 +1,26 @@
 # WORKLOG
 
+## 2026-03-22 07:30: Phase 3 Complete — Quality & Polish
+
+### What was done
+- Fixed test_doc E2E failure (missing `mammoth` dependency in pyproject.toml)
+- ANY2-9: Improved error messages for missing deps, added `any2md deps` subcommand
+- Updated CLAUDE.md with new CLI flags, test counts, common.py docs
+- Bumped to v0.2.0, created GitHub release, updated brew formula
+- `brew upgrade roboalchemist/tap/any2md` verified at v0.2.0
+- All work pushed to GitHub
+
+### Results
+- 683 unit tests passing (test_sub/test_yt skip due to missing pysubs2/mlx-audio — not errors)
+- Brew formula at v0.2.0 verified working
+- GOAL.md Phase 3 complete
+
+### Current state
+- Phase 3 ✅ done, Phase 4 (test coverage) next
+- 9 trckr tickets total, all done
+
+---
+
 ## 2026-03-22 06:45: CLI Standards Upgrade Complete + Cant-Stop-Wont-Stop Initiated
 
 ### What was done
