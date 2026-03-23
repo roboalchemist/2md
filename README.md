@@ -85,8 +85,9 @@ any2md nb notebook.ipynb --no-outputs
 | `org` | Emacs Org-mode | pure regex | **none** |
 | `tex` | LaTeX | pure regex | **none** |
 | `man` | Unix man pages | mandoc + regex fallback | **none** |
+| `repo` | Git repositories | repomix (npm) | repomix |
 
-**7 of 16 converters are zero-dependency** (stdlib only). `audio` and `video` are aliases for `yt` (same engine, clearer naming).
+**8 of 20 converters are zero-dependency** (stdlib only). `audio` and `video` are aliases for `yt` (same engine, clearer naming).
 
 ## Architecture
 
@@ -109,7 +110,8 @@ src/any2md/
 ├── eml.py       # Email (.eml/.mbox) → markdown
 ├── org.py       # Org-mode → markdown
 ├── tex.py       # LaTeX → markdown
-└── man.py       # Unix man pages → markdown
+├── man.py       # Unix man pages → markdown
+└── repo.py      # Git repositories via repomix
 ```
 
 All tools produce YAML frontmatter with source metadata followed by the converted markdown body.
