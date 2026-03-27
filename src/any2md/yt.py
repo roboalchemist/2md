@@ -128,19 +128,15 @@ def download_youtube_audio(url_or_id: str, output_dir: Optional[str] = None) -> 
     # Prepare output filename template
     output_template = os.path.join(output_dir, f"{video_id}.%(ext)s")
 
-    # Configure yt-dlp options
+    # Configure yt-dlp options — download best audio in its native format.
+    # No mp3 postprocessor: convert_audio_for_whisper() handles the single
+    # ffmpeg call to 16kHz mono WAV directly from any container format.
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': output_template,
         'noplaylist': True,
         'quiet': False,
         'no_warnings': False,
-        'extractaudio': True,
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
     }
 
     logger.info(f"Downloading audio from YouTube video: {video_id}")
@@ -149,11 +145,12 @@ def download_youtube_audio(url_or_id: str, output_dir: Optional[str] = None) -> 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
 
-    # The downloaded file path
-    audio_file = os.path.join(output_dir, f"{video_id}.mp3")
-
-    if not os.path.exists(audio_file):
-        raise FileNotFoundError(f"Failed to download audio file: {audio_file}")
+    # yt-dlp downloads in native format (webm/m4a/opus/etc) — find the actual file
+    import glob
+    candidates = glob.glob(os.path.join(output_dir, f"{video_id}.*"))
+    if not candidates:
+        raise FileNotFoundError(f"Failed to download audio for video: {video_id}")
+    audio_file = candidates[0]
 
     # Extract metadata
     metadata = extract_youtube_metadata(info)
@@ -255,7 +252,7 @@ def convert_audio_for_whisper(input_file: str, output_dir: Optional[str] = None)
 
     # Generate output filename
     base_name = os.path.splitext(os.path.basename(input_file))[0]
-    output_file = os.path.join(output_dir, f"{base_name}_whisper.wav")
+    output_file = os.path.join(output_dir, f"{base_name}.wav")
 
     # FFmpeg command to convert to 16kHz mono WAV
     cmd = [
@@ -713,9 +710,13 @@ def process_input_file(input_file: str, output_dir: Optional[str] = None) -> Tup
     """
     Process an input audio/video file.
 
+    Returns the original file path and extracted title. No intermediate
+    conversion is done — convert_audio_for_whisper() handles the single
+    ffmpeg call to 16kHz mono WAV directly from any input format.
+
     Args:
         input_file: Path to the input audio/video file
-        output_dir: Directory to save the processed audio (default: temporary directory)
+        output_dir: Directory to save the processed audio (unused, kept for API compat)
 
     Returns:
         Tuple containing (audio_file_path, title)
@@ -723,42 +724,9 @@ def process_input_file(input_file: str, output_dir: Optional[str] = None) -> Tup
     if not os.path.exists(input_file):
         raise FileNotFoundError(f"Input file not found: {input_file}")
 
-    # Use temporary directory if none specified
-    if output_dir is None:
-        output_dir = tempfile.gettempdir()
-
-    # Ensure output directory exists
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Extract filename without extension as title
     title = os.path.splitext(os.path.basename(input_file))[0]
 
-    # Convert to mp3 if not already
-    if not input_file.lower().endswith('.mp3'):
-        output_file = os.path.join(output_dir, f"{title}.mp3")
-        cmd = [
-            "ffmpeg",
-            "-y",  # Overwrite output file if it exists
-            "-i", input_file,
-            "-vn",  # Disable video
-            "-acodec", "libmp3lame",
-            "-q:a", "4",  # High quality
-            output_file
-        ]
-
-        logger.info(f"Converting input file to mp3: {output_file}")
-
-        try:
-            subprocess.run(cmd, check=True, capture_output=True)
-        except subprocess.CalledProcessError as e:
-            logger.error(f"FFmpeg conversion failed: {e.stderr.decode() if e.stderr else str(e)}")
-            raise
-
-        audio_file = output_file
-    else:
-        audio_file = input_file
-
-    return audio_file, title
+    return input_file, title
 
 
 def auto_detect_input(input_path: str) -> Tuple[str, bool]:

@@ -4,14 +4,14 @@
 
 A toolkit for converting any media, document, or data format to markdown with YAML frontmatter. AI inference runs locally on Apple Silicon via MLX. No cloud APIs. 20 converters, 8 zero-dependency (stdlib only).
 
-**Version**: 0.2.2 | **Package**: `any2md` | **Entry point**: `any2md.cli:app`
+**Version**: 0.2.3 | **Package**: `any2md` | **Entry point**: `any2md.cli:app`
 
 ## Project Structure
 
 ```
 any2md/
 ├── src/any2md/
-│   ├── __init__.py      # Package init, __version__ = "0.2.2"
+│   ├── __init__.py      # Package init, __version__ = "0.2.3"
 │   ├── cli.py           # Unified entry point — auto-detect + subcommands (298 lines)
 │   ├── common.py        # Shared: build_frontmatter(), setup_logging(), JSON mode (287 lines)
 │   ├── yt.py            # Audio/video/YouTube transcription + Sortformer diarization (859 lines)
@@ -253,4 +253,4 @@ any2md deps                 # Show installed/missing optional dependencies
 
 ## Project History
 
-Originally `yt2srt` on `lightning-whisper-mlx`. Migrated to `yt2md` on `mlx-audio` with Parakeet, rewritten from argparse to typer. Then expanded from 2 tools (yt2md + pdf2md) to 20 converters as a proper Python package (`src/any2md/`) with unified CLI, optional dependency groups, and 808 tests. v0.2.0 added quality & polish pass; v0.2.2 added `repo` subcommand via repomix.
+Originally `yt2srt` on `lightning-whisper-mlx`. Migrated to `yt2md` on `mlx-audio` with Parakeet, rewritten from argparse to typer. Then expanded from 2 tools (yt2md + pdf2md) to 20 converters as a proper Python package (`src/any2md/`) with unified CLI, optional dependency groups, and 808 tests. v0.2.0 added quality & polish pass; v0.2.3 added `repo` subcommand via repomix.
