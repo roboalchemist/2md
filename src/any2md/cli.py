@@ -120,13 +120,20 @@ def _get_tool_apps() -> dict:
     _try_import("man", "any2md.man")
     _try_import("repo", "any2md.repo")
 
+    # Speaker catalog management — uses speaker_app (not app) from speaker module
+    try:
+        from any2md import speaker as speaker_mod
+        apps["speaker"] = speaker_mod.speaker_app
+    except ImportError:
+        pass
+
     return apps
 
 
 _SUBCOMMANDS = {
     "yt", "audio", "video", "pdf", "img", "web", "html", "doc", "rst",
     "csv", "data", "db", "sub", "nb", "eml", "org", "tex", "man", "repo",
-    "deps",
+    "speaker", "deps",
 }
 
 
@@ -287,6 +294,7 @@ Subcommands (run 'any2md <cmd> --help' for options):
   eml   Email (.eml/.mbox)             org   Org-mode
   tex   LaTeX                          man   Unix man pages
   repo  Git repository via repomix
+  speaker  Manage speaker enrollment catalog
   deps  Show optional dependency status
 
 Available on this system: {available}""")

@@ -24,12 +24,22 @@ Usage (catalog):
     speaker_id = add_speaker(conn, 'Alice')
     enroll(conn, speaker_id, embedding, source_file='meeting.wav', start=0.0, end=3.5)
     match = match_speaker(conn, query_embedding)  # {'id': ..., 'name': 'Alice', 'distance': 0.08}
+
+CLI:
+    any2md speaker add "Alice" --audio file.wav
+    any2md speaker list
+    any2md speaker remove "Alice"
+    any2md speaker merge "Alice" "Bob"
+    any2md speaker stats "Alice"
+    any2md speaker gallery "Alice"
 """
 
+import json
 import logging
 import os
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import uuid
 from datetime import datetime, timezone
@@ -37,6 +47,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+import typer
 
 logger = logging.getLogger(__name__)
 
@@ -337,6 +348,134 @@ def delete_speaker(conn: sqlite3.Connection, name: str) -> bool:
     if deleted:
         logger.debug("Deleted speaker %r and their enrollments", name)
     return deleted
+
+
+def get_enrollments(conn: sqlite3.Connection, speaker_id: str) -> List[Dict]:
+    """Return all enrollment records for a speaker.
+
+    Args:
+        conn: Open catalog connection.
+        speaker_id: UUID of the speaker.
+
+    Returns:
+        List of dicts with keys: id, speaker_id, source_file, segment_start,
+        segment_end, source_type, confidence, is_representative, created_at.
+        Does NOT include raw embedding blobs.
+    """
+    rows = conn.execute(
+        """
+        SELECT id, speaker_id, source_file, segment_start, segment_end,
+               source_type, confidence, is_representative, created_at
+        FROM enrollments
+        WHERE speaker_id = ?
+        ORDER BY created_at ASC
+        """,
+        (speaker_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def merge_speakers(
+    conn: sqlite3.Connection,
+    from_name: str,
+    to_name: str,
+    reason: Optional[str] = None,
+) -> Dict:
+    """Merge speaker from_name into to_name.
+
+    Moves all enrollments from from_name to to_name, recomputes the centroid
+    and distance stats for to_name, records the merge in speaker_merges, and
+    deletes the from_name speaker.
+
+    Args:
+        conn: Open catalog connection.
+        from_name: Name of the speaker to merge (will be deleted).
+        to_name: Name of the target speaker (retains identity).
+        reason: Optional human-readable reason for the merge.
+
+    Returns:
+        Dict with keys: from_id, to_id, from_name, to_name, enrollment_count,
+        merge_id.
+
+    Raises:
+        ValueError: If either speaker name is not found.
+    """
+    from_speaker = get_speaker_by_name(conn, from_name)
+    if from_speaker is None:
+        raise ValueError(f"Speaker not found: {from_name!r}")
+    to_speaker = get_speaker_by_name(conn, to_name)
+    if to_speaker is None:
+        raise ValueError(f"Speaker not found: {to_name!r}")
+
+    from_id = from_speaker["id"]
+    to_id = to_speaker["id"]
+
+    # Move vec_enrollments rows — best-effort (sqlite-vec may not be available)
+    from_enrollment_ids = conn.execute(
+        "SELECT id FROM enrollments WHERE speaker_id = ?", (from_id,)
+    ).fetchall()
+    for row in from_enrollment_ids:
+        eid = row["id"]
+        try:
+            conn.execute(
+                "UPDATE vec_enrollments SET enrollment_id = ? WHERE enrollment_id = ?",
+                (eid, eid),  # no-op on content, but ensures integrity
+            )
+        except sqlite3.OperationalError:
+            pass
+
+    # Move enrollments to to_speaker
+    conn.execute(
+        "UPDATE enrollments SET speaker_id = ? WHERE speaker_id = ?",
+        (to_id, from_id),
+    )
+
+    # Record the merge audit trail
+    merge_id = _new_id()
+    now = _now_iso()
+    conn.execute(
+        """
+        INSERT INTO speaker_merges (id, from_speaker_id, to_speaker_id, reason, merged_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (merge_id, from_id, to_id, reason, now),
+    )
+
+    # Delete the from_speaker (enrollments already re-parented, cascade only removes remaining)
+    conn.execute("DELETE FROM speakers WHERE id = ?", (from_id,))
+    conn.commit()
+
+    # Recompute centroid and stats for to_speaker
+    update_centroid(conn, to_id)
+    update_distance_stats(conn, to_id)
+
+    # Update enrollment count for to_speaker
+    conn.execute(
+        """
+        UPDATE speakers
+        SET enrollment_count = (SELECT COUNT(*) FROM enrollments WHERE speaker_id = ?),
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (to_id, now, to_id),
+    )
+    conn.commit()
+
+    # Fetch updated count
+    updated = conn.execute(
+        "SELECT enrollment_count FROM speakers WHERE id = ?", (to_id,)
+    ).fetchone()
+    new_count = updated["enrollment_count"] if updated else 0
+
+    logger.debug("Merged speaker %r into %r (%d total enrollments)", from_name, to_name, new_count)
+    return {
+        "from_id": from_id,
+        "to_id": to_id,
+        "from_name": from_name,
+        "to_name": to_name,
+        "enrollment_count": new_count,
+        "merge_id": merge_id,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -942,3 +1081,313 @@ def extract_embeddings_for_segments(
 
     logger.info("Extracted %d speaker embeddings from %s", len(results), audio_path)
     return results
+
+
+# ---------------------------------------------------------------------------
+# CLI — any2md speaker subcommand group
+# ---------------------------------------------------------------------------
+
+speaker_app = typer.Typer(
+    name="speaker",
+    help="Manage speaker enrollment catalog.",
+    no_args_is_help=True,
+)
+
+_DEFAULT_DB_PATH = str(_DEFAULT_CATALOG_PATH)
+
+
+def _fmt_date(iso_str: Optional[str]) -> str:
+    """Format an ISO8601 datetime string to a compact date for table display."""
+    if not iso_str:
+        return "-"
+    try:
+        return iso_str[:10]  # 'YYYY-MM-DD'
+    except Exception:
+        return iso_str
+
+
+def _print_table(rows: List[List[str]], headers: List[str]) -> None:
+    """Print a simple fixed-width text table to stdout."""
+    all_rows = [headers] + rows
+    widths = [max(len(r[i]) for r in all_rows) for i in range(len(headers))]
+    sep = "  "
+    header_line = sep.join(h.ljust(widths[i]) for i, h in enumerate(headers))
+    divider = sep.join("-" * widths[i] for i in range(len(headers)))
+    typer.echo(header_line)
+    typer.echo(divider)
+    for row in rows:
+        typer.echo(sep.join(row[i].ljust(widths[i]) for i in range(len(headers))))
+
+
+@speaker_app.command("add")
+def speaker_add(
+    name: str = typer.Argument(..., help="Speaker name to enroll."),
+    audio: Path = typer.Option(..., "--audio", help="Path to audio file (any ffmpeg-supported format)."),
+    start: Optional[float] = typer.Option(None, "--start", help="Segment start in seconds (optional)."),
+    end: Optional[float] = typer.Option(None, "--end", help="Segment end in seconds (optional)."),
+    db: str = typer.Option(_DEFAULT_DB_PATH, "--db", help="Path to speaker catalog database."),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output JSON to stdout."),
+    verbose: bool = typer.Option(False, "-v", "--verbose", help="Enable verbose logging."),
+) -> None:
+    """Enroll a speaker from an audio file (or segment).
+
+    Extracts a WeSpeaker embedding and adds it to the speaker catalog.
+    Creates the speaker profile automatically if it does not exist.
+    """
+    from any2md.common import setup_logging
+    setup_logging(verbose)
+
+    # Validate audio path
+    audio_path = Path(audio).resolve()
+    if not audio_path.exists():
+        typer.echo(f"Error: audio file not found: {audio_path}", err=True)
+        raise typer.Exit(1)
+
+    if start is not None and end is not None and start >= end:
+        typer.echo(f"Error: --start ({start}) must be less than --end ({end})", err=True)
+        raise typer.Exit(1)
+
+    # Convert to 16kHz mono WAV using yt.convert_audio_for_whisper
+    try:
+        from any2md.yt import convert_audio_for_whisper
+    except ImportError as exc:
+        typer.echo(f"Error: yt module unavailable — {exc}", err=True)
+        raise typer.Exit(1)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            wav_path = convert_audio_for_whisper(str(audio_path), output_dir=tmpdir)
+        except Exception as exc:
+            typer.echo(f"Error converting audio to WAV: {exc}", err=True)
+            raise typer.Exit(1)
+
+        # Load WeSpeaker model and extract embedding
+        try:
+            model = load_speaker_model()
+        except ImportError as exc:
+            typer.echo(f"Error: {exc}", err=True)
+            raise typer.Exit(1)
+
+        try:
+            embedding = extract_embedding(model, wav_path, start=start, end=end)
+        except Exception as exc:
+            typer.echo(f"Error extracting embedding: {exc}", err=True)
+            raise typer.Exit(1)
+
+    # Open catalog and create or update speaker
+    conn = open_catalog(db if db != _DEFAULT_DB_PATH else None)
+    existing = get_speaker_by_name(conn, name)
+    if existing is None:
+        speaker_id = add_speaker(conn, name)
+    else:
+        speaker_id = existing["id"]
+
+    # Build source_type hint from segment vs full-file
+    source_type = "manual_segment" if (start is not None or end is not None) else "manual_full"
+
+    enroll(
+        conn,
+        speaker_id,
+        embedding,
+        source_file=str(audio_path),
+        start=start,
+        end=end,
+        source_type=source_type,
+    )
+
+    speaker = get_speaker_by_name(conn, name)
+    count = speaker["enrollment_count"] if speaker else 1
+
+    if json_output:
+        typer.echo(json.dumps({
+            "speaker": name,
+            "speaker_id": speaker_id,
+            "enrollment_count": count,
+            "action": "created" if existing is None else "enrolled",
+        }))
+    else:
+        action = "Created and enrolled" if existing is None else "Enrolled"
+        typer.echo(f"{action} {name!r} ({count} total enrollment{'s' if count != 1 else ''})")
+
+
+@speaker_app.command("list")
+def speaker_list(
+    db: str = typer.Option(_DEFAULT_DB_PATH, "--db", help="Path to speaker catalog database."),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output JSON to stdout."),
+    verbose: bool = typer.Option(False, "-v", "--verbose", help="Enable verbose logging."),
+) -> None:
+    """List all enrolled speakers."""
+    from any2md.common import setup_logging
+    setup_logging(verbose)
+
+    conn = open_catalog(db if db != _DEFAULT_DB_PATH else None)
+    speakers = get_all_speakers(conn)
+
+    if json_output:
+        typer.echo(json.dumps(speakers, default=str))
+        return
+
+    if not speakers:
+        typer.echo("No speakers enrolled. Use: any2md speaker add")
+        return
+
+    rows = [
+        [
+            s["name"],
+            str(s["enrollment_count"]),
+            str(s.get("meeting_count", 0)),
+            _fmt_date(s.get("last_seen_at")),
+            _fmt_date(s.get("created_at")),
+            _fmt_date(s.get("updated_at")),
+        ]
+        for s in speakers
+    ]
+    _print_table(rows, ["Name", "Enrollments", "Meetings", "Last Seen", "Created", "Updated"])
+
+
+@speaker_app.command("remove")
+def speaker_remove(
+    name: str = typer.Argument(..., help="Speaker name to remove."),
+    force: bool = typer.Option(False, "--force", help="Skip confirmation prompt."),
+    db: str = typer.Option(_DEFAULT_DB_PATH, "--db", help="Path to speaker catalog database."),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output JSON to stdout."),
+    verbose: bool = typer.Option(False, "-v", "--verbose", help="Enable verbose logging."),
+) -> None:
+    """Remove a speaker and all their enrollments from the catalog."""
+    from any2md.common import setup_logging
+    setup_logging(verbose)
+
+    conn = open_catalog(db if db != _DEFAULT_DB_PATH else None)
+    existing = get_speaker_by_name(conn, name)
+    if existing is None:
+        typer.echo(f"Speaker not found: {name!r}", err=True)
+        raise typer.Exit(1)
+
+    enrollment_count = existing["enrollment_count"]
+
+    if not force:
+        confirmed = typer.confirm(
+            f"Delete speaker {name!r} and {enrollment_count} enrollment(s)?"
+        )
+        if not confirmed:
+            typer.echo("Aborted.")
+            raise typer.Exit(0)
+
+    deleted = delete_speaker(conn, name)
+
+    if json_output:
+        typer.echo(json.dumps({"speaker": name, "deleted": deleted, "enrollments_removed": enrollment_count}))
+    else:
+        if deleted:
+            typer.echo(f"Removed speaker {name!r} and {enrollment_count} enrollment(s).")
+        else:
+            typer.echo(f"Speaker not found: {name!r}", err=True)
+            raise typer.Exit(1)
+
+
+@speaker_app.command("merge")
+def speaker_merge(
+    name_a: str = typer.Argument(..., help="Speaker to merge FROM (will be deleted)."),
+    name_b: str = typer.Argument(..., help="Speaker to merge INTO (retains identity)."),
+    reason: Optional[str] = typer.Option(None, "--reason", help="Optional reason for the merge."),
+    db: str = typer.Option(_DEFAULT_DB_PATH, "--db", help="Path to speaker catalog database."),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output JSON to stdout."),
+    verbose: bool = typer.Option(False, "-v", "--verbose", help="Enable verbose logging."),
+) -> None:
+    """Merge speaker A into speaker B (A is deleted, B retains all enrollments)."""
+    from any2md.common import setup_logging
+    setup_logging(verbose)
+
+    conn = open_catalog(db if db != _DEFAULT_DB_PATH else None)
+
+    try:
+        result = merge_speakers(conn, name_a, name_b, reason=reason)
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1)
+
+    if json_output:
+        typer.echo(json.dumps(result))
+    else:
+        typer.echo(
+            f"Merged {name_a!r} into {name_b!r}. "
+            f"{name_b!r} now has {result['enrollment_count']} enrollment(s)."
+        )
+
+
+@speaker_app.command("stats")
+def speaker_stats(
+    name: str = typer.Argument(..., help="Speaker name to show stats for."),
+    db: str = typer.Option(_DEFAULT_DB_PATH, "--db", help="Path to speaker catalog database."),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output JSON to stdout."),
+    verbose: bool = typer.Option(False, "-v", "--verbose", help="Enable verbose logging."),
+) -> None:
+    """Show detailed stats for a speaker (enrollment count, distance stats, meeting count)."""
+    from any2md.common import setup_logging
+    setup_logging(verbose)
+
+    conn = open_catalog(db if db != _DEFAULT_DB_PATH else None)
+    speaker = get_speaker_by_name(conn, name)
+    if speaker is None:
+        typer.echo(f"Speaker not found: {name!r}", err=True)
+        raise typer.Exit(1)
+
+    if json_output:
+        # Exclude centroid blob; already excluded by get_speaker_by_name
+        typer.echo(json.dumps(speaker, default=str))
+        return
+
+    typer.echo(f"Speaker: {speaker['name']}")
+    typer.echo(f"  Enrollments:    {speaker['enrollment_count']}")
+    typer.echo(f"  Meetings:       {speaker.get('meeting_count', 0)}")
+    typer.echo(f"  Mean distance:  {speaker.get('mean_distance', 0.0):.4f}")
+    typer.echo(f"  Std distance:   {speaker.get('std_distance', 0.0):.4f}")
+    typer.echo(f"  Last seen:      {_fmt_date(speaker.get('last_seen_at'))}")
+    typer.echo(f"  Created:        {_fmt_date(speaker.get('created_at'))}")
+    typer.echo(f"  Updated:        {_fmt_date(speaker.get('updated_at'))}")
+
+
+@speaker_app.command("gallery")
+def speaker_gallery(
+    name: str = typer.Argument(..., help="Speaker name to show gallery for."),
+    db: str = typer.Option(_DEFAULT_DB_PATH, "--db", help="Path to speaker catalog database."),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output JSON to stdout."),
+    verbose: bool = typer.Option(False, "-v", "--verbose", help="Enable verbose logging."),
+) -> None:
+    """List all enrollments for a speaker (source type, date, confidence)."""
+    from any2md.common import setup_logging
+    setup_logging(verbose)
+
+    conn = open_catalog(db if db != _DEFAULT_DB_PATH else None)
+    speaker = get_speaker_by_name(conn, name)
+    if speaker is None:
+        typer.echo(f"Speaker not found: {name!r}", err=True)
+        raise typer.Exit(1)
+
+    enrollments = get_enrollments(conn, speaker["id"])
+
+    if json_output:
+        typer.echo(json.dumps(enrollments, default=str))
+        return
+
+    if not enrollments:
+        typer.echo(f"No enrollments found for speaker {name!r}.")
+        return
+
+    typer.echo(f"Gallery for {name!r} ({len(enrollments)} enrollment(s)):")
+    rows = []
+    for i, e in enumerate(enrollments, 1):
+        conf = f"{e['confidence']:.3f}" if e.get("confidence") is not None else "-"
+        seg = "-"
+        if e.get("segment_start") is not None and e.get("segment_end") is not None:
+            seg = f"{e['segment_start']:.1f}-{e['segment_end']:.1f}s"
+        rows.append([
+            str(i),
+            e.get("source_type") or "-",
+            seg,
+            conf,
+            "yes" if e.get("is_representative") else "no",
+            _fmt_date(e.get("created_at")),
+            (e.get("source_file") or "-"),
+        ])
+    _print_table(rows, ["#", "Source Type", "Segment", "Confidence", "Representative", "Date", "File"])
