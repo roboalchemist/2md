@@ -12,9 +12,10 @@ A toolkit for converting any media, document, or data format to markdown with YA
 any2md/
 ├── src/any2md/
 │   ├── __init__.py      # Package init, __version__ = "0.3.0"
-│   ├── cli.py           # Unified entry point — auto-detect + subcommands (298 lines)
+│   ├── cli.py           # Unified entry point — auto-detect + subcommands (555 lines)
 │   ├── common.py        # Shared: build_frontmatter(), setup_logging(), JSON mode (287 lines)
-│   ├── yt.py            # Audio/video/YouTube transcription + Sortformer diarization (859 lines)
+│   ├── yt.py            # Audio/video/YouTube transcription + Sortformer diarization (1145 lines)
+│   ├── speaker.py       # WeSpeaker speaker catalog: enrollment, gallery, KNN matching (1591 lines)
 │   ├── pdf.py           # PDF extraction + optional VLM OCR via mlx-vlm (607 lines)
 │   ├── img.py           # Image OCR via Qwen3.5 (mlx-vlm) (474 lines)
 │   ├── web.py           # Web URL → markdown via ReaderLM-v2 (mlx-lm) (465 lines)
@@ -31,6 +32,7 @@ any2md/
 │   ├── tex.py           # LaTeX, pure regex (801 lines)
 │   ├── man.py           # Unix man pages, mandoc + regex fallback (766 lines)
 │   └── repo.py          # Git repositories via repomix (npm wrapper) (172 lines)
+├── llms.txt             # LLM-friendly quick reference (links to README + CLAUDE.md)
 ├── tests/
 │   ├── conftest.py      # Pytest configuration
 │   ├── create_fixtures.py
@@ -93,7 +95,7 @@ any2md/
 
 - `app()` — Main entry point: parses sys.argv, handles early flags (`--help`, `--version`, `--quiet`, `--json`), routes to converter
 
-**Subcommands**: `yt`, `audio`, `video`, `pdf`, `img`, `web`, `html`, `doc`, `rst`, `csv`, `data`, `db`, `sub`, `nb`, `eml`, `org`, `tex`, `man`, `repo`, `deps`. (`audio` and `video` are aliases for `yt`)
+**Subcommands**: `yt`, `audio`, `video`, `pdf`, `img`, `web`, `html`, `doc`, `rst`, `csv`, `data`, `db`, `sub`, `nb`, `eml`, `org`, `tex`, `man`, `repo`, `speaker`, `deps`, `docs`, `completion`. (`audio` and `video` are aliases for `yt`)
 
 ### Converter Pattern
 
@@ -134,7 +136,7 @@ repo.py: git dir → repomix CLI → markdown with file stats frontmatter
 
 | Module | Key Function | External Dep | Notes |
 |--------|-------------|-------------|-------|
-| `yt.py` | `transcribe_audio_via_mlx()` | mlx-audio, yt-dlp, ffmpeg | Supports diarization, SRT output |
+| `yt.py` | `transcribe_audio_via_mlx()` | mlx-audio, yt-dlp, ffmpeg | Supports diarization, SRT output, speaker identification |
 | `pdf.py` | `process_pdf_file()` | pymupdf4llm, mlx-vlm | Auto-fallback OCR when < 50 chars/page |
 | `img.py` | `process_image_file()` | mlx-vlm (Qwen3.5) | Supports JPEG, PNG, GIF, BMP, WebP, TIFF |
 | `web.py` | `html_to_markdown()` | mlx-lm (ReaderLM-v2), httpx | 200K char limit, 8192 max output tokens |
@@ -151,6 +153,7 @@ repo.py: git dir → repomix CLI → markdown with file stats frontmatter
 | `tex.py` | `process_tex_file()` | stdlib only | Pure regex conversion |
 | `man.py` | `process_man_file()` | mandoc (optional) | Regex fallback if mandoc unavailable |
 | `repo.py` | `process_repo_dir()` | repomix (npm) | Thin wrapper (172 lines), requires `repomix` installed globally |
+| `speaker.py` | `match_speaker()` | wespeaker, torch, sqlite-vec | WeSpeaker ResNet293 embeddings, KNN gallery matching |
 
 ### Model System
 
@@ -217,6 +220,7 @@ any2md <input>
 
 # Explicit subcommands
 any2md yt <input>  [--model NAME] [--diarize] [--format md|srt|txt] [--chunk-duration FLOAT] [--keep-audio]
+                   [--identify] [--auto-enroll] [--no-enroll]
 any2md pdf <input> [--pages "1-10,15"] [--ocr] [--model NAME]
 any2md img <input> [--model NAME]
 any2md web <url>
@@ -228,10 +232,18 @@ any2md sub <input>
 any2md nb  <input> [--no-outputs]
 any2md repo <dir>  [--style markdown|json] [--compress] [--remove-comments]
 
+# Speaker catalog management (requires --diarize + wespeaker)
+any2md speaker add NAME --audio FILE   # Enroll a speaker from an audio file
+any2md speaker list                    # List all enrolled speakers
+any2md speaker remove NAME             # Delete a speaker and their embeddings
+any2md speaker merge NAME_A NAME_B     # Merge FROM into INTO (deletes NAME_A)
+any2md speaker stats NAME              # Distance stats for a speaker's gallery
+any2md speaker gallery NAME            # Show enrolled embedding gallery entries
+
 # Global flags (all subcommands)
   --json, -j                # JSON output to stdout (agent-friendly)
   --fields FIELDS           # Dot-notation field selection for --json (e.g., "frontmatter.rows,content")
-  --quiet, -q               # Suppress INFO logs (or set ANY2MD_QUIET=1)
+  --quiet, -q, --silent     # Suppress INFO logs (or set ANY2MD_QUIET=1)
   --version, -V             # Print version and exit
   -o, --output-dir PATH     # Output directory (default: cwd)
   -f, --format [md|txt]     # Output format (default: md)
@@ -239,7 +251,16 @@ any2md repo <dir>  [--style markdown|json] [--compress] [--remove-comments]
 
 # Utility subcommands
 any2md deps                 # Show installed/missing optional dependencies
+any2md docs                 # Print README documentation to stdout
+any2md completion bash      # Output bash completion script
+any2md completion zsh       # Output zsh completion script
+any2md completion fish      # Output fish completion script
 ```
+
+**yt speaker identification flags** (require `--diarize`):
+- `--identify` — Match diarized segments against speaker catalog (requires wespeaker)
+- `--auto-enroll` — Auto-enroll unmatched speakers as Unknown_N without prompting (requires `--identify`)
+- `--no-enroll` — Skip enrollment prompts; leave unmatched speakers as SPEAKER_N labels (requires `--identify`; mutually exclusive with `--auto-enroll`)
 
 **JSON output format** (for `--json` mode):
 ```json
@@ -253,4 +274,4 @@ any2md deps                 # Show installed/missing optional dependencies
 
 ## Project History
 
-Originally `yt2srt` on `lightning-whisper-mlx`. Migrated to `yt2md` on `mlx-audio` with Parakeet, rewritten from argparse to typer. Then expanded from 2 tools (yt2md + pdf2md) to 20 converters as a proper Python package (`src/any2md/`) with unified CLI, optional dependency groups, and 808 tests. v0.2.0 added quality & polish pass; v0.3.0 added `repo` subcommand via repomix.
+Originally `yt2srt` on `lightning-whisper-mlx`. Migrated to `yt2md` on `mlx-audio` with Parakeet, rewritten from argparse to typer. Then expanded from 2 tools (yt2md + pdf2md) to 20 converters as a proper Python package (`src/any2md/`) with unified CLI, optional dependency groups, and 808 tests. v0.2.0 added quality & polish pass; v0.2.3 added `repo` subcommand via repomix; v0.3.0 added `speaker` catalog, `docs`/`completion` subcommands, `--silent` flag, and `--identify`/`--auto-enroll`/`--no-enroll` flags on `yt`.
