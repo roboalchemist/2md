@@ -1118,6 +1118,140 @@ class TestTranscribeEnrollmentLogic(unittest.TestCase):
             mock_add_speaker.assert_not_called()
             mock_enroll.assert_not_called()
 
+    def test_speaker_names_passed_to_identify_speakers(self):
+        """--speakers: speaker_names list is forwarded to identify_speakers()."""
+        import contextlib
+        from unittest.mock import patch, MagicMock, call
+        from any2md.yt import transcribe
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio_path = tmpdir + "/test.wav"
+            open(audio_path, "w").close()
+
+            fake_model = self._make_fake_mlx_model()
+            diarized = [{"start": 0.0, "end": 3.0, "speaker": "SPEAKER_0", "text": "hi",
+                         "embedding": _make_rand_emb(10)}]
+            # speaker_map: SPEAKER_0 matched as Alice
+            speaker_map = {
+                "SPEAKER_0": {
+                    "name": "Alice",
+                    "matched": True,
+                    "distance": 0.05,
+                    "high_conf": True,
+                    "avg_embedding": _make_rand_emb(10),
+                    "segments": [{"start": 0.0, "end": 3.0}],
+                }
+            }
+            mock_identify = MagicMock(return_value=speaker_map)
+
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(self._patch_load(fake_model))
+                self._apply_diarize_patches(stack, diarized_segments=diarized)
+                stack.enter_context(patch("any2md.speaker.identify_speakers", mock_identify))
+                stack.enter_context(patch("any2md.speaker.open_catalog", return_value=MagicMock()))
+                stack.enter_context(patch("any2md.speaker.close_catalog"))
+                stack.enter_context(patch("any2md.speaker.add_speaker", return_value="sp-id"))
+                stack.enter_context(patch("any2md.speaker.enroll", return_value="enr-id"))
+                stack.enter_context(patch("any2md.speaker._next_unknown_name", return_value="Unknown_0"))
+                stack.enter_context(patch("sys.stdout.isatty", return_value=False))
+                stack.enter_context(patch("any2md.yt.is_json_mode", return_value=False))
+                transcribe(
+                    audio_path,
+                    output_dir=tmpdir,
+                    diarize_model_name="fake-model",
+                    identify=True,
+                    no_enroll=True,
+                    speaker_names=["Alice", "Bob"],
+                )
+
+            # identify_speakers must have been called with speaker_names=["Alice", "Bob"]
+            mock_identify.assert_called_once()
+            _, kwargs = mock_identify.call_args
+            self.assertEqual(kwargs.get("speaker_names"), ["Alice", "Bob"])
+
+    def test_speaker_names_none_when_not_specified(self):
+        """--identify without --speakers: speaker_names=None passed to identify_speakers (full catalog)."""
+        import contextlib
+        from unittest.mock import patch, MagicMock
+        from any2md.yt import transcribe
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio_path = tmpdir + "/test.wav"
+            open(audio_path, "w").close()
+
+            fake_model = self._make_fake_mlx_model()
+            diarized = [{"start": 0.0, "end": 3.0, "speaker": "SPEAKER_0", "text": "hi",
+                         "embedding": _make_rand_emb(11)}]
+            speaker_map = _make_speaker_map_with_unmatched("SPEAKER_0")
+            mock_identify = MagicMock(return_value=speaker_map)
+
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(self._patch_load(fake_model))
+                self._apply_diarize_patches(stack, diarized_segments=diarized)
+                stack.enter_context(patch("any2md.speaker.identify_speakers", mock_identify))
+                stack.enter_context(patch("any2md.speaker.open_catalog", return_value=MagicMock()))
+                stack.enter_context(patch("any2md.speaker.close_catalog"))
+                stack.enter_context(patch("any2md.speaker.add_speaker", return_value="sp-id"))
+                stack.enter_context(patch("any2md.speaker.enroll", return_value="enr-id"))
+                stack.enter_context(patch("any2md.speaker._next_unknown_name", return_value="Unknown_0"))
+                stack.enter_context(patch("sys.stdout.isatty", return_value=False))
+                stack.enter_context(patch("any2md.yt.is_json_mode", return_value=False))
+                transcribe(
+                    audio_path,
+                    output_dir=tmpdir,
+                    diarize_model_name="fake-model",
+                    identify=True,
+                    no_enroll=True,
+                    speaker_names=None,  # default: no filter
+                )
+
+            # identify_speakers must have been called with speaker_names=None
+            mock_identify.assert_called_once()
+            _, kwargs = mock_identify.call_args
+            self.assertIsNone(kwargs.get("speaker_names"))
+
+
+class TestSpeakersCliFlag(unittest.TestCase):
+    """Test --speakers CLI flag validation (warning when --identify not set)."""
+
+    def test_speakers_without_identify_warns_and_ignores(self):
+        """--speakers without --identify should log a warning and not fail."""
+        from unittest.mock import patch, MagicMock
+        import logging
+
+        # We test the warning is emitted by patching logger.warning in yt module
+        with patch("any2md.yt.logger") as mock_logger, \
+             patch("any2md.yt.auto_detect_input", return_value=("audio", False)), \
+             patch("any2md.yt.process_input_file", return_value=("/tmp/fake.wav", "Test")), \
+             patch("any2md.yt.convert_audio_for_whisper", return_value="/tmp/fake16k.wav"), \
+             patch("any2md.yt.transcribe", return_value="/tmp/out.md") as mock_transcribe, \
+             patch("any2md.yt.is_json_mode", return_value=False), \
+             tempfile.TemporaryDirectory() as tmpdir:
+
+            from typer.testing import CliRunner
+            from any2md.yt import app
+
+            runner = CliRunner()
+            result = runner.invoke(app, [
+                "/tmp/fake.wav",
+                "--speakers", "Alice,Bob",
+                # NOTE: no --diarize, no --identify
+                "--output-dir", tmpdir,
+            ])
+
+            # The warning about --speakers without --identify should have been logged
+            warning_calls = [str(c) for c in mock_logger.warning.call_args_list]
+            speakers_warning = any("--speakers" in c for c in warning_calls)
+            self.assertTrue(
+                speakers_warning,
+                f"Expected warning about --speakers without --identify. Got: {warning_calls}"
+            )
+
+            # transcribe should have been called with speaker_names=None (ignored)
+            if mock_transcribe.called:
+                _, tkwargs = mock_transcribe.call_args
+                self.assertIsNone(tkwargs.get("speaker_names"))
+
 
 if __name__ == "__main__":
     unittest.main()

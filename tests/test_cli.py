@@ -282,5 +282,30 @@ class TestCompletionSubcommand(unittest.TestCase):
         self.assertIn("completion", result.stdout)
 
 
+class TestYtSpeakersFlag(unittest.TestCase):
+    """Test that --speakers appears in yt --help output."""
+
+    def _run(self, *args):
+        return subprocess.run(
+            [sys.executable, "-m", "any2md.cli", *args],
+            capture_output=True,
+            text=True,
+        )
+
+    def test_speakers_in_yt_help(self):
+        """--speakers should be visible in `any2md yt --help`."""
+        result = self._run("yt", "--help")
+        self.assertIn("--speakers", result.stdout,
+                      "Expected --speakers to appear in `any2md yt --help`")
+
+    def test_speakers_in_yt_help_mentions_identify(self):
+        """--speakers help text should mention --identify."""
+        result = self._run("yt", "--help")
+        # The help text for --speakers should mention --identify as a requirement
+        # We look for both flags to appear somewhere in the help output
+        self.assertIn("--identify", result.stdout)
+        self.assertIn("--speakers", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

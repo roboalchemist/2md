@@ -674,6 +674,7 @@ def transcribe(
     auto_enroll: bool = False,
     no_enroll: bool = False,
     _unmatched_out: Optional[List] = None,
+    speaker_names: Optional[List[str]] = None,
 ) -> str:
     """
     Transcribe audio file using mlx-audio (Parakeet).
@@ -698,6 +699,9 @@ def transcribe(
         _unmatched_out: Optional mutable list; if provided, unmatched speaker dicts (with
             label, embedding, segments) are appended to it for the caller to use (e.g. JSON
             output). Internal use by main() only.
+        speaker_names: Optional list of speaker names to restrict catalog matching to.
+            Passed to identify_speakers(speaker_names=...). When None, all catalog
+            speakers are searched.
 
     Returns:
         Path to the generated output file
@@ -786,7 +790,10 @@ def transcribe(
             catalog_path = None  # Use default catalog path
             conn = open_catalog(catalog_path)
             try:
-                speaker_map = identify_speakers(conn, diarized_segments, audio_for_speaker or audio_file)
+                speaker_map = identify_speakers(
+                    conn, diarized_segments, audio_for_speaker or audio_file,
+                    speaker_names=speaker_names,
+                )
 
                 # --- Post-identification enrollment ---
                 unmatched = [
@@ -1037,6 +1044,10 @@ def main(
         "--no-enroll",
         help="Skip enrollment prompts entirely; leave unmatched speakers as SPEAKER_N labels. Requires --identify.",
     )] = False,
+    speakers: Annotated[Optional[str], typer.Option(
+        "--speakers",
+        help="Comma-separated speaker names to match against (limits search space). Requires --identify.",
+    )] = None,
     verbose: Annotated[bool, typer.Option(
         "--verbose", "-v",
         help="Enable verbose (DEBUG) logging.",
@@ -1085,6 +1096,15 @@ def main(
                 logger.warning("--identify has no effect without --diarize; ignoring")
                 identify = False
 
+            if speakers and not identify:
+                logger.warning("--speakers has no effect without --identify; ignoring")
+                speakers = None
+
+            # Parse comma-separated speaker names into a list
+            speaker_names: Optional[List[str]] = None
+            if speakers and identify:
+                speaker_names = [s.strip() for s in speakers.split(",") if s.strip()]
+
             if auto_enroll and no_enroll:
                 logger.error("--auto-enroll and --no-enroll are mutually exclusive")
                 raise typer.Exit(code=1)
@@ -1112,6 +1132,7 @@ def main(
                 auto_enroll=auto_enroll,
                 no_enroll=no_enroll,
                 _unmatched_out=_unmatched if (json_output or is_json_mode()) else None,
+                speaker_names=speaker_names,
             )
 
             logger.info(f"Transcription completed successfully. Output saved to: {output_file}")
@@ -1130,6 +1151,15 @@ def main(
                 }
                 if _unmatched:
                     output_dict["unmatched_speakers"] = _unmatched
+                if speaker_names and identify:
+                    # Build attendance report: who was expected vs. who was found
+                    _identified = list(fm.get("identified_speakers", []))
+                    _unknown = list(fm.get("unidentified_speakers", []))
+                    output_dict["attendance"] = {
+                        "expected": speaker_names,
+                        "identified": _identified,
+                        "unknown": _unknown,
+                    }
                 if fields:
                     from any2md.common import _filter_fields
                     output_dict = _filter_fields(output_dict, fields)
