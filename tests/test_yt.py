@@ -485,5 +485,122 @@ class TestMergeDiarizationSegments(unittest.TestCase):
         self.assertEqual(len(result.segments), 2)
 
 
+# ---------------------------------------------------------------------------
+# Tests for segments_to_markdown_diarized with speaker_map
+# ---------------------------------------------------------------------------
+
+
+class TestSegmentsToMarkdownDiarizedWithSpeakerMap(unittest.TestCase):
+    """Test segments_to_markdown_diarized() with identification speaker_map."""
+
+    def _make_segs(self):
+        return [
+            {"start": 0.0, "end": 5.0, "speaker": "SPEAKER_0", "text": "Hello everyone."},
+            {"start": 5.0, "end": 10.0, "speaker": "SPEAKER_1", "text": "Hi there."},
+            {"start": 10.0, "end": 15.0, "speaker": "SPEAKER_2", "text": "Good morning."},
+        ]
+
+    def test_no_speaker_map_uses_legacy_format(self):
+        result = segments_to_markdown_diarized(self._make_segs())
+        self.assertIn("**SPEAKER_SPEAKER_0**", result)
+        self.assertIn("**SPEAKER_SPEAKER_1**", result)
+
+    def test_matched_high_conf_shows_name_without_score(self):
+        speaker_map = {
+            "SPEAKER_0": {"name": "Alice", "matched": True, "distance": 0.10, "high_conf": True},
+        }
+        result = segments_to_markdown_diarized(self._make_segs(), speaker_map=speaker_map)
+        self.assertIn("**Alice**", result)
+        # Should NOT show a confidence score for high-conf
+        self.assertNotIn("(0.", result.split("**Alice**")[1].split("\n")[0])
+
+    def test_matched_medium_conf_shows_score(self):
+        speaker_map = {
+            "SPEAKER_0": {"name": "Joe", "matched": True, "distance": 0.25, "high_conf": False},
+        }
+        result = segments_to_markdown_diarized(self._make_segs(), speaker_map=speaker_map)
+        self.assertIn("**Joe**", result)
+        # First line with Joe should contain confidence score
+        joe_line = [l for l in result.split("\n") if "**Joe**" in l][0]
+        self.assertIn("(0.75)", joe_line)
+
+    def test_unmatched_speaker_keeps_original_label(self):
+        speaker_map = {
+            "SPEAKER_0": {"name": "SPEAKER_0", "matched": False, "distance": None, "high_conf": False},
+        }
+        result = segments_to_markdown_diarized(self._make_segs(), speaker_map=speaker_map)
+        self.assertIn("**SPEAKER_0**", result)
+
+    def test_partial_map_unmatched_label_preserved(self):
+        """SPEAKER_2 has no entry in map — should fall back to SPEAKER_N format."""
+        speaker_map = {
+            "SPEAKER_0": {"name": "Alice", "matched": True, "distance": 0.05, "high_conf": True},
+            "SPEAKER_1": {"name": "Bob", "matched": True, "distance": 0.08, "high_conf": True},
+            # SPEAKER_2 intentionally absent
+        }
+        result = segments_to_markdown_diarized(self._make_segs(), speaker_map=speaker_map)
+        self.assertIn("**Alice**", result)
+        self.assertIn("**Bob**", result)
+        self.assertIn("**SPEAKER_SPEAKER_2**", result)
+
+    def test_frontmatter_included_when_metadata_provided(self):
+        metadata = {"title": "Test Meeting", "speakers": 2}
+        result = segments_to_markdown_diarized(self._make_segs(), metadata=metadata)
+        self.assertIn("title:", result)
+        self.assertIn("speakers:", result)
+
+
+# ---------------------------------------------------------------------------
+# Tests for segments_to_srt_diarized and segments_to_text_diarized with speaker_map
+# ---------------------------------------------------------------------------
+
+
+class TestDiarizedFormattersWithSpeakerMap(unittest.TestCase):
+
+    def _make_segs(self):
+        return [
+            {"start": 0.0, "end": 5.0, "speaker": "SPEAKER_0", "text": "Hello."},
+            {"start": 5.0, "end": 10.0, "speaker": "SPEAKER_1", "text": "Hi."},
+        ]
+
+    def test_srt_shows_name_when_matched(self):
+        speaker_map = {
+            "SPEAKER_0": {"name": "Alice", "matched": True, "distance": 0.05, "high_conf": True},
+        }
+        result = segments_to_srt_diarized(self._make_segs(), speaker_map=speaker_map)
+        self.assertIn("[Alice]", result)
+
+    def test_srt_keeps_speaker_n_when_unmatched(self):
+        speaker_map = {
+            "SPEAKER_0": {"name": "SPEAKER_0", "matched": False, "distance": None, "high_conf": False},
+        }
+        result = segments_to_srt_diarized(self._make_segs(), speaker_map=speaker_map)
+        self.assertIn("[SPEAKER_SPEAKER_0]", result)
+
+    def test_srt_no_map_uses_legacy_format(self):
+        result = segments_to_srt_diarized(self._make_segs())
+        self.assertIn("[SPEAKER_SPEAKER_0]", result)
+        self.assertIn("[SPEAKER_SPEAKER_1]", result)
+
+    def test_text_shows_name_when_matched(self):
+        speaker_map = {
+            "SPEAKER_1": {"name": "Bob", "matched": True, "distance": 0.07, "high_conf": True},
+        }
+        result = segments_to_text_diarized(self._make_segs(), speaker_map=speaker_map)
+        self.assertIn("Bob:", result)
+
+    def test_text_keeps_speaker_n_when_unmatched(self):
+        speaker_map = {
+            "SPEAKER_1": {"name": "SPEAKER_1", "matched": False, "distance": None, "high_conf": False},
+        }
+        result = segments_to_text_diarized(self._make_segs(), speaker_map=speaker_map)
+        self.assertIn("SPEAKER_SPEAKER_1:", result)
+
+    def test_text_no_map_uses_legacy_format(self):
+        result = segments_to_text_diarized(self._make_segs())
+        self.assertIn("SPEAKER_SPEAKER_0:", result)
+        self.assertIn("SPEAKER_SPEAKER_1:", result)
+
+
 if __name__ == "__main__":
     unittest.main()

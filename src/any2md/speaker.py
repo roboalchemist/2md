@@ -1083,6 +1083,161 @@ def extract_embeddings_for_segments(
     return results
 
 
+def identify_speakers(
+    conn: sqlite3.Connection,
+    segments: List[Dict],
+    audio_path: str,
+    high_conf_threshold: float = 0.15,
+    low_conf_threshold: float = 0.30,
+) -> Dict[str, Dict]:
+    """Match diarized speaker labels against the speaker catalog.
+
+    Groups segments by speaker label, computes a duration-weighted average
+    embedding per speaker, then calls match_speaker() against the catalog.
+
+    Thresholds use cosine *distance* (lower = more similar):
+    - distance <= high_conf_threshold: auto-match, enroll embedding, update stats
+    - high_conf_threshold < distance <= low_conf_threshold: match but flag with confidence
+    - distance > low_conf_threshold: no match, keep SPEAKER_N label
+
+    After identification, matched speakers have their meeting_count incremented,
+    last_seen_at updated, and the averaged embedding enrolled into their gallery.
+    maintain_gallery() is called for each updated speaker.
+
+    Args:
+        conn: Open catalog connection.
+        segments: List of diarized segment dicts. Each must contain 'speaker' (str),
+                  'start' (float), 'end' (float). May contain 'embedding' (numpy array)
+                  if extract_embeddings_for_segments() was already called; if absent,
+                  the speaker's longest segment embedding will be used.
+        audio_path: Path to 16kHz mono WAV (used to extract embeddings if missing).
+        high_conf_threshold: Cosine distance threshold for high-confidence auto-match
+                             (default 0.15 — tight match, auto-enroll + update stats).
+        low_conf_threshold: Cosine distance threshold for flagged match (default 0.30 —
+                            match shown with confidence score but no gallery update).
+
+    Returns:
+        Dict mapping speaker label (e.g. 'SPEAKER_0') to a result dict:
+        {
+            'name': str,        # resolved name or original SPEAKER_N label
+            'matched': bool,    # True if a catalog match was found
+            'distance': float,  # cosine distance (0=identical); None if no match
+            'high_conf': bool,  # True if distance <= high_conf_threshold
+        }
+        Unmatched speakers have 'matched': False, 'name': original label.
+    """
+    # Group segments by unique speaker label
+    speaker_segments: Dict[str, List[Dict]] = {}
+    for seg in segments:
+        label = seg.get("speaker", "")
+        if label not in speaker_segments:
+            speaker_segments[label] = []
+        speaker_segments[label].append(seg)
+
+    speaker_map: Dict[str, Dict] = {}
+
+    for label, spk_segs in speaker_segments.items():
+        # Compute duration-weighted average embedding for this speaker
+        avg_embedding = _compute_weighted_avg_embedding(spk_segs)
+
+        if avg_embedding is None:
+            logger.warning("No valid embeddings for speaker %s — skipping identification", label)
+            speaker_map[label] = {"name": label, "matched": False, "distance": None, "high_conf": False}
+            continue
+
+        # Query catalog for best match using low_conf_threshold as outer gate
+        match = match_speaker(conn, avg_embedding, threshold=low_conf_threshold)
+
+        if match is None:
+            speaker_map[label] = {"name": label, "matched": False, "distance": None, "high_conf": False}
+            logger.debug("No catalog match for speaker %s", label)
+            continue
+
+        distance = match["distance"]
+        speaker_id = match["id"]
+        speaker_name = match["name"]
+        high_conf = distance <= high_conf_threshold
+
+        speaker_map[label] = {
+            "name": speaker_name,
+            "matched": True,
+            "distance": distance,
+            "high_conf": high_conf,
+        }
+        logger.info(
+            "Identified %s as %r (distance=%.3f, %s confidence)",
+            label, speaker_name, distance,
+            "high" if high_conf else "medium",
+        )
+
+        if high_conf:
+            # Auto-enroll the averaged embedding and update speaker stats
+            now = _now_iso()
+            enroll(
+                conn,
+                speaker_id,
+                avg_embedding,
+                source_file=audio_path,
+                source_type="auto_identify",
+                confidence=round(1.0 - distance, 4),
+            )
+            conn.execute(
+                """
+                UPDATE speakers
+                SET meeting_count = meeting_count + 1,
+                    last_seen_at = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (now, now, speaker_id),
+            )
+            conn.commit()
+            maintain_gallery(conn, speaker_id)
+            logger.debug(
+                "Auto-enrolled embedding + updated meeting_count for %r (speaker_id=%s)",
+                speaker_name, speaker_id,
+            )
+
+    return speaker_map
+
+
+def _compute_weighted_avg_embedding(segments: List[Dict]) -> Optional[np.ndarray]:
+    """Compute a duration-weighted average embedding from a list of segments.
+
+    Segments with an 'embedding' key are included in the average, weighted by
+    (end - start). Segments without embeddings (e.g., zero-duration or failed
+    extraction) are skipped.
+
+    Args:
+        segments: List of segment dicts, each with 'start', 'end', and optionally
+                  'embedding' (numpy.ndarray of shape (256,)).
+
+    Returns:
+        L2-normalized 256-d numpy array, or None if no valid embeddings found.
+    """
+    weighted_sum = np.zeros(EMBEDDING_DIM, dtype=np.float64)
+    total_weight = 0.0
+
+    for seg in segments:
+        emb = seg.get("embedding")
+        if emb is None:
+            continue
+        emb_arr = np.array(emb, dtype=np.float64)
+        # Skip zero-vector embeddings (failed extractions)
+        if np.linalg.norm(emb_arr) < 1e-10:
+            continue
+        duration = float(seg.get("end", 0)) - float(seg.get("start", 0))
+        weight = max(duration, 1e-6)  # At minimum a tiny weight to include short segs
+        weighted_sum += emb_arr * weight
+        total_weight += weight
+
+    if total_weight < 1e-10:
+        return None
+
+    avg = (weighted_sum / total_weight).astype(np.float32)
+    return _l2_normalize(avg)
+
+
 # ---------------------------------------------------------------------------
 # CLI — any2md speaker subcommand group
 # ---------------------------------------------------------------------------

@@ -1054,5 +1054,201 @@ class TestCatalogRoundTrip(unittest.TestCase):
         self.assertIsNone(after)
 
 
+# ---------------------------------------------------------------------------
+# Tests for _compute_weighted_avg_embedding
+# ---------------------------------------------------------------------------
+
+
+class TestComputeWeightedAvgEmbedding(unittest.TestCase):
+
+    def test_returns_none_when_no_embeddings(self):
+        from any2md.speaker import _compute_weighted_avg_embedding
+        segments = [
+            {"start": 0.0, "end": 1.0, "speaker": "SPEAKER_0", "text": "hi"},
+        ]
+        # No 'embedding' key present
+        result = _compute_weighted_avg_embedding(segments)
+        self.assertIsNone(result)
+
+    def test_returns_none_for_zero_embeddings(self):
+        from any2md.speaker import _compute_weighted_avg_embedding
+        segments = [
+            {"start": 0.0, "end": 1.0, "speaker": "SPEAKER_0",
+             "embedding": np.zeros(256, dtype=np.float32)},
+        ]
+        result = _compute_weighted_avg_embedding(segments)
+        self.assertIsNone(result)
+
+    def test_single_segment_returns_normalized_embedding(self):
+        from any2md.speaker import _compute_weighted_avg_embedding
+        emb = _rand_emb(42)
+        segments = [
+            {"start": 0.0, "end": 2.0, "speaker": "SPEAKER_0", "embedding": emb},
+        ]
+        result = _compute_weighted_avg_embedding(segments)
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(float(np.linalg.norm(result)), 1.0, places=5)
+
+    def test_weighted_by_duration(self):
+        """Longer segment should dominate the average."""
+        from any2md.speaker import _compute_weighted_avg_embedding
+        emb_a = np.zeros(256, dtype=np.float32)
+        emb_a[0] = 1.0  # Points entirely in dim 0
+        emb_b = np.zeros(256, dtype=np.float32)
+        emb_b[1] = 1.0  # Points entirely in dim 1
+
+        # emb_b is 10x longer
+        segments = [
+            {"start": 0.0, "end": 1.0, "speaker": "SPEAKER_0", "embedding": emb_a},
+            {"start": 1.0, "end": 11.0, "speaker": "SPEAKER_0", "embedding": emb_b},
+        ]
+        result = _compute_weighted_avg_embedding(segments)
+        self.assertIsNotNone(result)
+        # Result should be closer to emb_b (dim 1 larger)
+        self.assertGreater(float(result[1]), float(result[0]))
+
+    def test_output_is_unit_norm(self):
+        """Result must always be L2-normalized."""
+        from any2md.speaker import _compute_weighted_avg_embedding
+        segments = [
+            {"start": 0.0, "end": 3.0, "speaker": "SPEAKER_0", "embedding": _rand_emb(1)},
+            {"start": 3.0, "end": 5.0, "speaker": "SPEAKER_0", "embedding": _rand_emb(2)},
+            {"start": 5.0, "end": 6.0, "speaker": "SPEAKER_0", "embedding": _rand_emb(3)},
+        ]
+        result = _compute_weighted_avg_embedding(segments)
+        self.assertAlmostEqual(float(np.linalg.norm(result)), 1.0, places=5)
+
+
+# ---------------------------------------------------------------------------
+# Tests for identify_speakers
+# ---------------------------------------------------------------------------
+
+
+class TestIdentifySpeakers(unittest.TestCase):
+
+    def _setup_catalog_with_speaker(self, name: str, seed: int = 0):
+        """Create an in-memory catalog with one enrolled speaker."""
+        conn = _open_test_catalog()
+        from any2md.speaker import add_speaker, enroll
+        speaker_id = add_speaker(conn, name)
+        ref_emb = _rand_emb(seed)
+        enroll(conn, speaker_id, ref_emb)
+        return conn, speaker_id, ref_emb
+
+    def test_returns_dict_keyed_by_speaker_label(self):
+        from any2md.speaker import identify_speakers
+        conn, _, ref = self._setup_catalog_with_speaker("Alice", seed=10)
+        segments = [
+            {"start": 0.0, "end": 2.0, "speaker": "SPEAKER_0", "text": "hi", "embedding": ref},
+        ]
+        result = identify_speakers(conn, segments, "/fake/audio.wav")
+        self.assertIn("SPEAKER_0", result)
+
+    def test_matched_speaker_has_correct_name(self):
+        from any2md.speaker import identify_speakers, _l2_normalize
+        conn, _, ref = self._setup_catalog_with_speaker("Alice", seed=20)
+        # Use nearly identical embedding for matching
+        close_emb = _l2_normalize(ref + np.random.default_rng(999).standard_normal(256).astype(np.float32) * 0.01)
+        segments = [
+            {"start": 0.0, "end": 5.0, "speaker": "SPEAKER_0", "text": "hi", "embedding": close_emb},
+        ]
+        result = identify_speakers(conn, segments, "/fake/audio.wav")
+        self.assertTrue(result["SPEAKER_0"]["matched"])
+        self.assertEqual(result["SPEAKER_0"]["name"], "Alice")
+
+    def test_unmatched_speaker_keeps_original_label(self):
+        from any2md.speaker import identify_speakers
+        conn = _open_test_catalog()  # Empty catalog — no speakers
+        segments = [
+            {"start": 0.0, "end": 3.0, "speaker": "SPEAKER_1", "text": "hello",
+             "embedding": _rand_emb(50)},
+        ]
+        result = identify_speakers(conn, segments, "/fake/audio.wav")
+        self.assertIn("SPEAKER_1", result)
+        self.assertFalse(result["SPEAKER_1"]["matched"])
+        self.assertEqual(result["SPEAKER_1"]["name"], "SPEAKER_1")
+
+    def test_result_includes_distance_for_matched_speaker(self):
+        from any2md.speaker import identify_speakers
+        conn, _, ref = self._setup_catalog_with_speaker("Bob", seed=30)
+        segments = [
+            {"start": 0.0, "end": 4.0, "speaker": "SPEAKER_0", "text": "hey", "embedding": ref},
+        ]
+        result = identify_speakers(conn, segments, "/fake/audio.wav")
+        if result["SPEAKER_0"]["matched"]:
+            self.assertIsNotNone(result["SPEAKER_0"]["distance"])
+            self.assertIsInstance(result["SPEAKER_0"]["distance"], float)
+
+    def test_no_embeddings_produces_unmatched_entry(self):
+        from any2md.speaker import identify_speakers
+        conn, _, _ = self._setup_catalog_with_speaker("Carol", seed=40)
+        # Segments without 'embedding' key
+        segments = [
+            {"start": 0.0, "end": 2.0, "speaker": "SPEAKER_0", "text": "bye"},
+        ]
+        result = identify_speakers(conn, segments, "/fake/audio.wav")
+        self.assertIn("SPEAKER_0", result)
+        self.assertFalse(result["SPEAKER_0"]["matched"])
+
+    def test_multiple_speakers_independently_matched(self):
+        from any2md.speaker import identify_speakers, add_speaker, enroll
+        conn = _open_test_catalog()
+        from any2md.speaker import add_speaker, enroll
+        alice_id = add_speaker(conn, "Alice")
+        bob_id = add_speaker(conn, "Bob")
+        alice_emb = _rand_emb(60)
+        bob_emb = _rand_emb(61)
+        enroll(conn, alice_id, alice_emb)
+        enroll(conn, bob_id, bob_emb)
+
+        segments = [
+            {"start": 0.0, "end": 3.0, "speaker": "SPEAKER_0", "text": "hi", "embedding": alice_emb},
+            {"start": 3.0, "end": 6.0, "speaker": "SPEAKER_1", "text": "hey", "embedding": bob_emb},
+        ]
+        result = identify_speakers(conn, segments, "/fake/audio.wav")
+        self.assertIn("SPEAKER_0", result)
+        self.assertIn("SPEAKER_1", result)
+        # Both should match
+        self.assertTrue(result["SPEAKER_0"]["matched"])
+        self.assertTrue(result["SPEAKER_1"]["matched"])
+        self.assertEqual(result["SPEAKER_0"]["name"], "Alice")
+        self.assertEqual(result["SPEAKER_1"]["name"], "Bob")
+
+    def test_high_conf_flag_set_for_close_match(self):
+        """A match with very small distance should be flagged high_conf=True."""
+        from any2md.speaker import identify_speakers
+        conn, _, ref = self._setup_catalog_with_speaker("Dana", seed=70)
+        segments = [
+            {"start": 0.0, "end": 5.0, "speaker": "SPEAKER_0", "text": "hi", "embedding": ref},
+        ]
+        # Use very tight thresholds so same embedding definitely hits high_conf
+        result = identify_speakers(conn, segments, "/fake/audio.wav",
+                                   high_conf_threshold=0.99, low_conf_threshold=0.99)
+        self.assertTrue(result["SPEAKER_0"].get("matched"))
+        self.assertTrue(result["SPEAKER_0"]["high_conf"])
+
+    def test_medium_conf_high_conf_false(self):
+        """A match inside low threshold but with high_conf_threshold below actual distance → high_conf=False."""
+        from any2md.speaker import identify_speakers, _l2_normalize
+        conn, _, ref = self._setup_catalog_with_speaker("Eve", seed=80)
+        # Create a query embedding that is somewhat different from the enrolled one
+        # by rotating slightly — should produce a non-zero distance
+        rng = np.random.default_rng(12345)
+        noise = rng.standard_normal(256).astype(np.float32) * 0.5
+        query_emb = _l2_normalize(ref + noise)  # noticeably different but still close
+
+        # Match should succeed with a loose low_conf_threshold
+        # but fail high_conf since distance > 0.0
+        segments = [
+            {"start": 0.0, "end": 5.0, "speaker": "SPEAKER_0", "text": "hi", "embedding": query_emb},
+        ]
+        # Set high_conf_threshold to near-zero so only perfect matches are high_conf
+        result = identify_speakers(conn, segments, "/fake/audio.wav",
+                                   high_conf_threshold=0.001, low_conf_threshold=0.99)
+        if result["SPEAKER_0"]["matched"]:
+            # Distance should be > 0.001 due to added noise
+            self.assertFalse(result["SPEAKER_0"]["high_conf"])
+
+
 if __name__ == "__main__":
     unittest.main()

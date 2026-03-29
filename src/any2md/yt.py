@@ -531,17 +531,32 @@ def align_speakers(transcription_segments: List, diarization_segments: List) -> 
 
 
 def segments_to_markdown_diarized(segments: List[Dict], title: Optional[str] = None,
-                                   metadata: Optional[Dict] = None) -> str:
+                                   metadata: Optional[Dict] = None,
+                                   speaker_map: Optional[Dict] = None) -> str:
     """Convert diarized segments to markdown with speaker headers.
 
-    Format:
+    Format (no identification):
         **SPEAKER_0** [00:00:00]
 
         text here...
 
-        **SPEAKER_1** [00:05:30]
+    Format (with identification, high-conf match):
+        **Alice** [00:00:00]
 
-        other text...
+        text here...
+
+    Format (with identification, medium-conf match):
+        **Joe** (0.74) [00:24]
+
+        text here...
+
+    Args:
+        segments: List of diarized segment dicts with 'start', 'end', 'speaker', 'text'.
+        title: Optional title for the markdown header.
+        metadata: Optional metadata dict for YAML frontmatter.
+        speaker_map: Optional dict mapping speaker labels (e.g. 'SPEAKER_0') to
+                     identification result dicts (as returned by identify_speakers()).
+                     If None or a label is absent, falls back to 'SPEAKER_N' format.
     """
     lines = []
 
@@ -555,7 +570,27 @@ def segments_to_markdown_diarized(segments: List[Dict], title: Optional[str] = N
 
     for seg in segments:
         ts = format_timestamp_md(seg["start"])
-        lines.append(f"**SPEAKER_{seg['speaker']}** [{ts}]")
+        raw_label = seg["speaker"]
+
+        # Build display name from speaker_map if available
+        if speaker_map and raw_label in speaker_map:
+            info = speaker_map[raw_label]
+            if info.get("matched"):
+                name = info["name"]
+                if not info.get("high_conf") and info.get("distance") is not None:
+                    # Medium confidence: show score
+                    conf_score = round(1.0 - info["distance"], 2)
+                    display = f"**{name}** ({conf_score:.2f}) [{ts}]"
+                else:
+                    display = f"**{name}** [{ts}]"
+            else:
+                # Unmatched — keep original label
+                display = f"**{raw_label}** [{ts}]"
+        else:
+            # No speaker_map at all — legacy SPEAKER_N format
+            display = f"**SPEAKER_{raw_label}** [{ts}]"
+
+        lines.append(display)
         lines.append("")
         lines.append(seg["text"])
         lines.append("")
@@ -563,25 +598,45 @@ def segments_to_markdown_diarized(segments: List[Dict], title: Optional[str] = N
     return "\n".join(lines)
 
 
-def segments_to_srt_diarized(segments: List[Dict]) -> str:
-    """Convert diarized segments to SRT with speaker prefix."""
+def segments_to_srt_diarized(segments: List[Dict], speaker_map: Optional[Dict] = None) -> str:
+    """Convert diarized segments to SRT with speaker prefix.
+
+    Args:
+        segments: List of diarized segment dicts.
+        speaker_map: Optional identification map from identify_speakers().
+    """
     srt_lines = []
     for i, seg in enumerate(segments):
         srt_lines.append(f"{i+1}")
         srt_lines.append(
             f"{format_timestamp_srt(seg['start'])} --> {format_timestamp_srt(seg['end'])}"
         )
-        srt_lines.append(f"[SPEAKER_{seg['speaker']}] {seg['text']}")
+        raw_label = seg["speaker"]
+        if speaker_map and raw_label in speaker_map and speaker_map[raw_label].get("matched"):
+            display = speaker_map[raw_label]["name"]
+        else:
+            display = f"SPEAKER_{raw_label}"
+        srt_lines.append(f"[{display}] {seg['text']}")
         if i < len(segments) - 1:
             srt_lines.append("")
     return "\n".join(srt_lines)
 
 
-def segments_to_text_diarized(segments: List[Dict]) -> str:
-    """Convert diarized segments to plain text with speaker prefix."""
+def segments_to_text_diarized(segments: List[Dict], speaker_map: Optional[Dict] = None) -> str:
+    """Convert diarized segments to plain text with speaker prefix.
+
+    Args:
+        segments: List of diarized segment dicts.
+        speaker_map: Optional identification map from identify_speakers().
+    """
     parts = []
     for seg in segments:
-        parts.append(f"SPEAKER_{seg['speaker']}: {seg['text']}")
+        raw_label = seg["speaker"]
+        if speaker_map and raw_label in speaker_map and speaker_map[raw_label].get("matched"):
+            display = speaker_map[raw_label]["name"]
+        else:
+            display = f"SPEAKER_{raw_label}"
+        parts.append(f"{display}: {seg['text']}")
     return "\n\n".join(parts)
 
 
@@ -688,7 +743,13 @@ def transcribe(
 
         if identify:
             try:
-                from any2md.speaker import load_speaker_model, extract_embeddings_for_segments
+                from any2md.speaker import (
+                    load_speaker_model,
+                    extract_embeddings_for_segments,
+                    identify_speakers,
+                    open_catalog,
+                    close_catalog,
+                )
                 speaker_wav = audio_for_speaker or audio_file
                 logger.info("Extracting speaker embeddings via WeSpeaker ResNet293...")
                 spk_model = load_speaker_model(device="mps")
@@ -699,15 +760,46 @@ def transcribe(
                 logger.error("Speaker identification requires any2md[speaker]: %s", e)
                 raise typer.Exit(code=1)
 
+    # Speaker identification: match embeddings against catalog
+    speaker_map: Optional[Dict] = None
+    if identify and diarized_segments is not None:
+        try:
+            from any2md.speaker import identify_speakers, open_catalog, close_catalog
+            logger.info("Matching speakers against catalog...")
+            catalog_path = None  # Use default catalog path
+            conn = open_catalog(catalog_path)
+            try:
+                speaker_map = identify_speakers(conn, diarized_segments, audio_for_speaker or audio_file)
+            finally:
+                close_catalog(catalog_path)
+
+            # Build frontmatter lists from speaker_map
+            if metadata is not None and speaker_map:
+                identified = [info["name"] for info in speaker_map.values() if info.get("matched")]
+                unidentified = [
+                    label for label, info in speaker_map.items() if not info.get("matched")
+                ]
+                if identified:
+                    metadata["identified_speakers"] = sorted(set(identified))
+                if unidentified:
+                    metadata["unidentified_speakers"] = sorted(set(unidentified))
+
+        except ImportError as e:
+            logger.warning("Speaker catalog matching unavailable (%s); using SPEAKER_N labels", e)
+            speaker_map = None
+
     # Format output
     if diarized_segments is not None:
         display_title = video_title or os.path.splitext(os.path.basename(audio_file))[0]
         if output_format == "md":
-            content = segments_to_markdown_diarized(diarized_segments, title=display_title, metadata=metadata)
+            content = segments_to_markdown_diarized(
+                diarized_segments, title=display_title, metadata=metadata,
+                speaker_map=speaker_map,
+            )
         elif output_format == "txt":
-            content = segments_to_text_diarized(diarized_segments)
+            content = segments_to_text_diarized(diarized_segments, speaker_map=speaker_map)
         else:
-            content = segments_to_srt_diarized(diarized_segments)
+            content = segments_to_srt_diarized(diarized_segments, speaker_map=speaker_map)
     elif output_format == "md":
         display_title = video_title or os.path.splitext(os.path.basename(audio_file))[0]
         content = segments_to_markdown(result.sentences, title=display_title, metadata=metadata)
