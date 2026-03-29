@@ -3,8 +3,7 @@
 speaker.py - WeSpeaker ResNet293 speaker embedding extraction + speaker catalog
 
 Extracts 256-d L2-normalized speaker embeddings from audio segments using
-WeSpeaker ResNet293 (Wespeaker/wespeaker-voxceleb-resnet293-LM) via PyTorch MPS
-on Apple Silicon.
+WeSpeaker ResNet293 via wespeakerruntime (ONNX Runtime — no PyTorch required).
 
 Also provides a persistent SQLite speaker catalog at ~/.config/any2md/speakers.db
 backed by sqlite-vec for fast KNN search (gallery model with multiple embeddings
@@ -51,8 +50,8 @@ import typer
 
 logger = logging.getLogger(__name__)
 
-# WeSpeaker model identifier used by wespeaker.load_model()
-WESPEAKER_LANG = "english"  # downloads wespeaker-voxceleb-resnet293-LM
+# Language passed to wespeakerruntime.Speaker(lang=...)
+WESPEAKER_LANG = "en"  # wespeakerruntime uses 'en' (not 'english')
 
 # Audio parameters — must match what WeSpeaker expects (same as Parakeet)
 AUDIO_SAMPLE_RATE = 16000  # 16kHz mono WAV
@@ -859,59 +858,36 @@ def maintain_gallery(
 
 
 def _import_wespeaker():
-    """Import wespeaker, raising a clear error if not installed."""
+    """Import wespeakerruntime, raising a clear error if not installed."""
     try:
-        import wespeaker
-        return wespeaker
+        import wespeakerruntime
+        return wespeakerruntime
     except ImportError as e:
         raise ImportError(
-            "wespeaker not installed — run: uv pip install 'any2md[speaker]'"
-        ) from e
-
-
-def _import_torch():
-    """Import torch, raising a clear error if not installed."""
-    try:
-        import torch
-        return torch
-    except ImportError as e:
-        raise ImportError(
-            "torch not installed — run: uv pip install 'any2md[speaker]'"
+            "wespeakerruntime not installed — run: uv pip install 'any2md[speaker]'"
         ) from e
 
 
 def load_speaker_model(device: str = "mps") -> Any:
-    """Load WeSpeaker ResNet293 speaker embedding model.
+    """Load WeSpeaker speaker embedding model via wespeakerruntime (ONNX).
 
-    Downloads the model from HuggingFace on first call (cached afterwards).
-    Uses PyTorch MPS on Apple Silicon; falls back to CPU if MPS is unavailable.
+    Downloads the ONNX model on first call (cached afterwards).
+    wespeakerruntime uses ONNX Runtime — no PyTorch required.
 
     Args:
-        device: PyTorch device string. 'mps' for Apple Silicon (default),
-                'cuda' for NVIDIA GPU, 'cpu' for CPU-only.
+        device: Ignored (wespeakerruntime uses ONNX Runtime, not PyTorch).
+                Kept for API compatibility.
 
     Returns:
-        Loaded WeSpeaker model object with set_device() already called.
+        wespeakerruntime.Speaker instance ready for extract_embedding() calls.
 
     Raises:
-        ImportError: If wespeaker or torch is not installed.
+        ImportError: If wespeakerruntime is not installed.
     """
-    wespeaker = _import_wespeaker()
-    torch = _import_torch()
+    wespeakerruntime = _import_wespeaker()
 
-    # Resolve device — fall back to CPU if MPS is requested but not available
-    if device == "mps":
-        if torch.backends.mps.is_available():
-            resolved_device = "mps"
-        else:
-            logger.warning("MPS not available, falling back to CPU for speaker embeddings")
-            resolved_device = "cpu"
-    else:
-        resolved_device = device
-
-    logger.info("Loading WeSpeaker ResNet293 model (device=%s)...", resolved_device)
-    model = wespeaker.load_model(WESPEAKER_LANG)
-    model.set_device(resolved_device)
+    logger.info("Loading WeSpeaker model via wespeakerruntime (ONNX)...")
+    model = wespeakerruntime.Speaker(lang="en")
     logger.info("WeSpeaker model loaded successfully")
     return model
 
@@ -1010,7 +986,7 @@ def extract_embedding(
     else:
         raw = model.extract_embedding(audio_path)
 
-    # wespeaker returns a numpy array; ensure float32 and L2-normalize
+    # wespeakerruntime returns a numpy array; ensure float32 and L2-normalize
     embedding = np.array(raw, dtype=np.float32).flatten()
     return _l2_normalize(embedding)
 

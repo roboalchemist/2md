@@ -58,27 +58,18 @@ class TestL2Normalize(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Tests for _import_wespeaker / _import_torch
+# Tests for _import_wespeaker
 # ---------------------------------------------------------------------------
 
 class TestImportGuards(unittest.TestCase):
 
-    @patch.dict("sys.modules", {"wespeaker": None})
+    @patch.dict("sys.modules", {"wespeakerruntime": None})
     def test_import_wespeaker_missing_raises_clear_error(self):
         import importlib
         import any2md.speaker as spk
         importlib.reload(spk)
         with self.assertRaises(ImportError) as ctx:
             spk._import_wespeaker()
-        self.assertIn("any2md[speaker]", str(ctx.exception))
-
-    @patch.dict("sys.modules", {"torch": None})
-    def test_import_torch_missing_raises_clear_error(self):
-        import importlib
-        import any2md.speaker as spk
-        importlib.reload(spk)
-        with self.assertRaises(ImportError) as ctx:
-            spk._import_torch()
         self.assertIn("any2md[speaker]", str(ctx.exception))
 
 
@@ -88,61 +79,33 @@ class TestImportGuards(unittest.TestCase):
 
 class TestLoadSpeakerModel(unittest.TestCase):
 
-    def _mock_torch(self, mps_available: bool):
-        torch_mock = MagicMock()
-        torch_mock.backends.mps.is_available.return_value = mps_available
-        return torch_mock
-
     @patch("any2md.speaker._import_wespeaker")
-    @patch("any2md.speaker._import_torch")
-    def test_loads_model_with_mps_when_available(self, mock_torch_fn, mock_ws_fn):
-        torch_mock = self._mock_torch(mps_available=True)
-        mock_torch_fn.return_value = torch_mock
-
+    def test_loads_model_via_speaker_constructor(self, mock_ws_fn):
+        """load_speaker_model() uses wespeakerruntime.Speaker(lang='en') API."""
         ws_mock = MagicMock()
         model_mock = MagicMock()
-        ws_mock.load_model.return_value = model_mock
+        ws_mock.Speaker.return_value = model_mock
         mock_ws_fn.return_value = ws_mock
 
         from any2md.speaker import load_speaker_model
         result = load_speaker_model(device="mps")
 
-        ws_mock.load_model.assert_called_once_with("english")
-        model_mock.set_device.assert_called_once_with("mps")
+        ws_mock.Speaker.assert_called_once_with(lang="en")
         self.assertIs(result, model_mock)
 
     @patch("any2md.speaker._import_wespeaker")
-    @patch("any2md.speaker._import_torch")
-    def test_falls_back_to_cpu_when_mps_unavailable(self, mock_torch_fn, mock_ws_fn):
-        torch_mock = self._mock_torch(mps_available=False)
-        mock_torch_fn.return_value = torch_mock
-
+    def test_device_arg_is_ignored(self, mock_ws_fn):
+        """device argument is accepted but ignored (ONNX doesn't use torch devices)."""
         ws_mock = MagicMock()
         model_mock = MagicMock()
-        ws_mock.load_model.return_value = model_mock
+        ws_mock.Speaker.return_value = model_mock
         mock_ws_fn.return_value = ws_mock
 
         from any2md.speaker import load_speaker_model
-        result = load_speaker_model(device="mps")
-
-        model_mock.set_device.assert_called_once_with("cpu")
-        self.assertIs(result, model_mock)
-
-    @patch("any2md.speaker._import_wespeaker")
-    @patch("any2md.speaker._import_torch")
-    def test_explicit_cpu_device(self, mock_torch_fn, mock_ws_fn):
-        torch_mock = self._mock_torch(mps_available=True)
-        mock_torch_fn.return_value = torch_mock
-
-        ws_mock = MagicMock()
-        model_mock = MagicMock()
-        ws_mock.load_model.return_value = model_mock
-        mock_ws_fn.return_value = ws_mock
-
-        from any2md.speaker import load_speaker_model
+        # Should not raise regardless of device arg
         load_speaker_model(device="cpu")
-
-        model_mock.set_device.assert_called_once_with("cpu")
+        load_speaker_model(device="mps")
+        self.assertEqual(ws_mock.Speaker.call_count, 2)
 
 
 # ---------------------------------------------------------------------------
@@ -375,15 +338,11 @@ class TestVoxCelebFixtures(unittest.TestCase):
     def test_all_fixtures_produce_256d_embeddings(self):
         import any2md.speaker as spk
 
-        torch_mock = MagicMock()
-        torch_mock.backends.mps.is_available.return_value = False
-
         ws_mock = MagicMock()
         model_mock = _fake_wespeaker_model()
-        ws_mock.load_model.return_value = model_mock
+        ws_mock.Speaker.return_value = model_mock
 
-        with patch("any2md.speaker._import_wespeaker", return_value=ws_mock), \
-             patch("any2md.speaker._import_torch", return_value=torch_mock):
+        with patch("any2md.speaker._import_wespeaker", return_value=ws_mock):
             model = spk.load_speaker_model(device="cpu")
 
         wav_files = sorted(FIXTURES_DIR.rglob("*.wav"))
@@ -401,15 +360,11 @@ class TestVoxCelebFixtures(unittest.TestCase):
         """Produce one embedding per VoxCeleb speaker using multi-segment path."""
         import any2md.speaker as spk
 
-        torch_mock = MagicMock()
-        torch_mock.backends.mps.is_available.return_value = False
-
         ws_mock = MagicMock()
         model_mock = _fake_wespeaker_model()
-        ws_mock.load_model.return_value = model_mock
+        ws_mock.Speaker.return_value = model_mock
 
-        with patch("any2md.speaker._import_wespeaker", return_value=ws_mock), \
-             patch("any2md.speaker._import_torch", return_value=torch_mock):
+        with patch("any2md.speaker._import_wespeaker", return_value=ws_mock):
             model = spk.load_speaker_model(device="cpu")
 
         # Build a fake segment list pointing at the first utterance of each speaker

@@ -24,7 +24,7 @@ img = ["mlx-vlm"]
 web = ["mlx-lm", "httpx"]
 doc = ["markitdown>=0.1.0", "mammoth>=1.12.0"]
 rst = []
-speaker = ["wespeaker", "sqlite-vec"]
+speaker = ["wespeakerruntime", "sqlite-vec"]
 all = ["any2md[stt,pdf,img,web,doc,speaker]"]
 
 [project.scripts]
