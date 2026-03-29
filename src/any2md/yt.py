@@ -614,6 +614,8 @@ def transcribe(
     output_format: str = DEFAULT_FORMAT,
     metadata: Optional[Dict] = None,
     diarize_model_name: Optional[str] = None,
+    identify: bool = False,
+    audio_for_speaker: Optional[str] = None,
 ) -> str:
     """
     Transcribe audio file using mlx-audio (Parakeet).
@@ -628,6 +630,9 @@ def transcribe(
         output_format: Output format — "md" (default), "srt", or "txt"
         metadata: Optional metadata dict for YAML frontmatter (markdown only)
         diarize_model_name: If set, run speaker diarization with this Sortformer model
+        identify: If True and diarization was run, extract WeSpeaker embeddings per segment
+        audio_for_speaker: Path to 16kHz mono WAV to use for speaker embedding extraction;
+            defaults to audio_file if identify is True and this is None
 
     Returns:
         Path to the generated output file
@@ -680,6 +685,19 @@ def transcribe(
         if metadata is not None:
             metadata["speakers"] = num_speakers
         logger.info("Detected %d speaker(s)", num_speakers)
+
+        if identify:
+            try:
+                from any2md.speaker import load_speaker_model, extract_embeddings_for_segments
+                speaker_wav = audio_for_speaker or audio_file
+                logger.info("Extracting speaker embeddings via WeSpeaker ResNet293...")
+                spk_model = load_speaker_model(device="mps")
+                diarized_segments = extract_embeddings_for_segments(
+                    spk_model, speaker_wav, diarized_segments
+                )
+            except ImportError as e:
+                logger.error("Speaker identification requires any2md[speaker]: %s", e)
+                raise typer.Exit(code=1)
 
     # Format output
     if diarized_segments is not None:
@@ -822,6 +840,10 @@ def main(
         "--diarize-model",
         help="Sortformer diarization model ID.",
     )] = DEFAULT_DIARIZE_MODEL,
+    identify: Annotated[bool, typer.Option(
+        "--identify/--no-identify",
+        help="Extract WeSpeaker ResNet293 speaker embeddings per diarized segment. Requires --diarize and any2md[speaker].",
+    )] = False,
     verbose: Annotated[bool, typer.Option(
         "--verbose", "-v",
         help="Enable verbose (DEBUG) logging.",
@@ -866,6 +888,10 @@ def main(
 
             whisper_audio = convert_audio_for_whisper(audio_file, temp_dir)
 
+            if identify and not diarize_flag:
+                logger.warning("--identify has no effect without --diarize; ignoring")
+                identify = False
+
             output_file = transcribe(
                 whisper_audio,
                 model,
@@ -876,6 +902,8 @@ def main(
                 format.value,
                 metadata,
                 diarize_model_name=diarize_model if diarize_flag else None,
+                identify=identify,
+                audio_for_speaker=whisper_audio if identify else None,
             )
 
             logger.info(f"Transcription completed successfully. Output saved to: {output_file}")
