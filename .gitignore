@@ -55,4 +55,4 @@ benchmark-results/
 
 # Except test audio files
 !test_audio/*.mp3
-!test_audio/*.wav 
+!test_audio/*.wav .claude/worktrees/
