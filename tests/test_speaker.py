@@ -1318,5 +1318,261 @@ class TestIdentifyUnmatchedHasEmbedding(unittest.TestCase):
         self.assertEqual(result["SPEAKER_0"]["name"], "Alice")
 
 
+# ---------------------------------------------------------------------------
+# Tests for match_speaker speaker_ids filter
+# ---------------------------------------------------------------------------
+
+
+class TestMatchSpeakerFilter(unittest.TestCase):
+    """Tests for the optional speaker_ids filter in match_speaker()."""
+
+    def setUp(self):
+        self.conn = _open_test_catalog()
+        from any2md.speaker import add_speaker, enroll
+        self.alice_id = add_speaker(self.conn, "Alice")
+        self.bob_id = add_speaker(self.conn, "Bob")
+        self.charlie_id = add_speaker(self.conn, "Charlie")
+        self.alice_emb = _rand_emb(200)
+        self.bob_emb = _rand_emb(201)
+        self.charlie_emb = _rand_emb(202)
+        enroll(self.conn, self.alice_id, self.alice_emb)
+        enroll(self.conn, self.bob_id, self.bob_emb)
+        enroll(self.conn, self.charlie_id, self.charlie_emb)
+
+    def test_filter_excludes_charlie(self):
+        """Charlie's embedding returns no match when filter is [Alice, Bob]."""
+        from any2md.speaker import match_speaker
+        result = match_speaker(
+            self.conn,
+            self.charlie_emb,
+            threshold=0.55,
+            speaker_ids=[self.alice_id, self.bob_id],
+        )
+        self.assertIsNone(result)
+
+    def test_filter_matches_alice_when_included(self):
+        """Alice's embedding matches when Alice is in the filter."""
+        from any2md.speaker import match_speaker
+        result = match_speaker(
+            self.conn,
+            self.alice_emb,
+            threshold=0.55,
+            speaker_ids=[self.alice_id, self.bob_id],
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["name"], "Alice")
+
+    def test_none_filter_matches_all_three(self):
+        """None filter (default) should be able to match all three speakers."""
+        from any2md.speaker import match_speaker
+        for emb, name in [
+            (self.alice_emb, "Alice"),
+            (self.bob_emb, "Bob"),
+            (self.charlie_emb, "Charlie"),
+        ]:
+            result = match_speaker(self.conn, emb, threshold=0.55, speaker_ids=None)
+            self.assertIsNotNone(result)
+            self.assertEqual(result["name"], name)
+
+    def test_empty_list_filter_matches_all_three(self):
+        """Empty list filter behaves like None — searches all speakers."""
+        from any2md.speaker import match_speaker
+        for emb, name in [
+            (self.alice_emb, "Alice"),
+            (self.bob_emb, "Bob"),
+            (self.charlie_emb, "Charlie"),
+        ]:
+            result = match_speaker(self.conn, emb, threshold=0.55, speaker_ids=[])
+            self.assertIsNotNone(result)
+            self.assertEqual(result["name"], name)
+
+    def test_filter_to_single_speaker(self):
+        """Filter to only Bob — Bob's embedding matches, Alice's does not."""
+        from any2md.speaker import match_speaker
+        bob_result = match_speaker(
+            self.conn, self.bob_emb, threshold=0.55, speaker_ids=[self.bob_id]
+        )
+        self.assertIsNotNone(bob_result)
+        self.assertEqual(bob_result["name"], "Bob")
+
+        alice_result = match_speaker(
+            self.conn, self.alice_emb, threshold=0.55, speaker_ids=[self.bob_id]
+        )
+        self.assertIsNone(alice_result)
+
+
+# ---------------------------------------------------------------------------
+# Tests for _match_speaker_python_fallback speaker_ids filter
+# ---------------------------------------------------------------------------
+
+
+class TestMatchSpeakerFallbackFilter(unittest.TestCase):
+    """Tests for speaker_ids filter in the Python centroid fallback path."""
+
+    def setUp(self):
+        self.conn = _open_test_catalog()
+        from any2md.speaker import add_speaker, enroll
+        self.alice_id = add_speaker(self.conn, "Alice")
+        self.bob_id = add_speaker(self.conn, "Bob")
+        self.charlie_id = add_speaker(self.conn, "Charlie")
+        self.alice_emb = _rand_emb(210)
+        self.bob_emb = _rand_emb(211)
+        self.charlie_emb = _rand_emb(212)
+        enroll(self.conn, self.alice_id, self.alice_emb)
+        enroll(self.conn, self.bob_id, self.bob_emb)
+        enroll(self.conn, self.charlie_id, self.charlie_emb)
+
+    def test_filter_excludes_charlie_from_fallback(self):
+        """Charlie's embedding returns no match when restricted to [Alice, Bob]."""
+        from any2md.speaker import _match_speaker_python_fallback, _l2_normalize
+        query = _l2_normalize(self.charlie_emb.astype("float32"))
+        result = _match_speaker_python_fallback(
+            self.conn, query, threshold=0.55,
+            speaker_ids=[self.alice_id, self.bob_id],
+        )
+        self.assertIsNone(result)
+
+    def test_none_filter_matches_all_in_fallback(self):
+        """None filter searches all speakers in fallback path."""
+        from any2md.speaker import _match_speaker_python_fallback, _l2_normalize
+        for emb, name in [
+            (self.alice_emb, "Alice"),
+            (self.bob_emb, "Bob"),
+            (self.charlie_emb, "Charlie"),
+        ]:
+            query = _l2_normalize(emb.astype("float32"))
+            result = _match_speaker_python_fallback(
+                self.conn, query, threshold=0.55, speaker_ids=None
+            )
+            self.assertIsNotNone(result)
+            self.assertEqual(result["name"], name)
+
+
+# ---------------------------------------------------------------------------
+# Tests for identify_speakers speaker_names filter
+# ---------------------------------------------------------------------------
+
+
+class TestIdentifySpeakersFilter(unittest.TestCase):
+    """Tests for the optional speaker_names filter in identify_speakers()."""
+
+    def setUp(self):
+        self.conn = _open_test_catalog()
+        from any2md.speaker import add_speaker, enroll
+        self.alice_id = add_speaker(self.conn, "Alice")
+        self.bob_id = add_speaker(self.conn, "Bob")
+        self.charlie_id = add_speaker(self.conn, "Charlie")
+        self.alice_emb = _rand_emb(220)
+        self.bob_emb = _rand_emb(221)
+        self.charlie_emb = _rand_emb(222)
+        enroll(self.conn, self.alice_id, self.alice_emb)
+        enroll(self.conn, self.bob_id, self.bob_emb)
+        enroll(self.conn, self.charlie_id, self.charlie_emb)
+
+    def _make_segments(self, label_emb_pairs):
+        """Build a minimal segments list from (label, embedding) pairs."""
+        return [
+            {"start": float(i), "end": float(i + 1), "speaker": label, "embedding": emb}
+            for i, (label, emb) in enumerate(label_emb_pairs)
+        ]
+
+    def test_charlie_returns_no_match_when_filter_is_alice_bob(self):
+        """Charlie's embedding → no match when filter restricts to [Alice, Bob]."""
+        from any2md.speaker import identify_speakers
+        segments = self._make_segments([("SPEAKER_0", self.charlie_emb)])
+        result = identify_speakers(
+            self.conn, segments, "/fake/audio.wav",
+            speaker_names=["Alice", "Bob"],
+        )
+        self.assertFalse(result["SPEAKER_0"]["matched"])
+
+    def test_charlie_unmatched_name_is_unknown_when_filter_active(self):
+        """When filter is active, unmatched speakers are labeled 'Unknown'."""
+        from any2md.speaker import identify_speakers
+        segments = self._make_segments([("SPEAKER_0", self.charlie_emb)])
+        result = identify_speakers(
+            self.conn, segments, "/fake/audio.wav",
+            speaker_names=["Alice", "Bob"],
+        )
+        self.assertEqual(result["SPEAKER_0"]["name"], "Unknown")
+
+    def test_none_filter_matches_all_three(self):
+        """None filter (default) → all three speakers can be matched."""
+        from any2md.speaker import identify_speakers
+        segments = self._make_segments([
+            ("SPEAKER_0", self.alice_emb),
+            ("SPEAKER_1", self.bob_emb),
+            ("SPEAKER_2", self.charlie_emb),
+        ])
+        result = identify_speakers(self.conn, segments, "/fake/audio.wav", speaker_names=None)
+        self.assertTrue(result["SPEAKER_0"]["matched"])
+        self.assertTrue(result["SPEAKER_1"]["matched"])
+        self.assertTrue(result["SPEAKER_2"]["matched"])
+        self.assertEqual(result["SPEAKER_0"]["name"], "Alice")
+        self.assertEqual(result["SPEAKER_1"]["name"], "Bob")
+        self.assertEqual(result["SPEAKER_2"]["name"], "Charlie")
+
+    def test_nonexistent_name_warns_but_does_not_error(self):
+        """Unknown name in speaker_names logs a warning but doesn't raise."""
+        import logging
+        from any2md.speaker import identify_speakers
+        segments = self._make_segments([("SPEAKER_0", self.alice_emb)])
+        with self.assertLogs("any2md.speaker", level=logging.WARNING) as cm:
+            result = identify_speakers(
+                self.conn, segments, "/fake/audio.wav",
+                speaker_names=["Alice", "DoesNotExist"],
+            )
+        # Should have warned about the unknown name
+        self.assertTrue(
+            any("DoesNotExist" in msg for msg in cm.output),
+            f"Expected warning about DoesNotExist, got: {cm.output}",
+        )
+        # Should still attempt to match Alice (no error)
+        self.assertIn("SPEAKER_0", result)
+
+    def test_identify_with_filter_correctly_limits_results(self):
+        """Filter [Alice] → Alice matches; Bob and Charlie do not."""
+        from any2md.speaker import identify_speakers
+        segments = self._make_segments([
+            ("SPEAKER_0", self.alice_emb),
+            ("SPEAKER_1", self.bob_emb),
+            ("SPEAKER_2", self.charlie_emb),
+        ])
+        result = identify_speakers(
+            self.conn, segments, "/fake/audio.wav",
+            speaker_names=["Alice"],
+        )
+        # Alice should match
+        self.assertTrue(result["SPEAKER_0"]["matched"])
+        self.assertEqual(result["SPEAKER_0"]["name"], "Alice")
+        # Bob and Charlie are outside the filter → Unknown
+        self.assertFalse(result["SPEAKER_1"]["matched"])
+        self.assertEqual(result["SPEAKER_1"]["name"], "Unknown")
+        self.assertFalse(result["SPEAKER_2"]["matched"])
+        self.assertEqual(result["SPEAKER_2"]["name"], "Unknown")
+
+    def test_empty_filter_matches_all_three(self):
+        """Empty speaker_names list behaves like None — searches all."""
+        from any2md.speaker import identify_speakers
+        segments = self._make_segments([
+            ("SPEAKER_0", self.alice_emb),
+            ("SPEAKER_1", self.bob_emb),
+            ("SPEAKER_2", self.charlie_emb),
+        ])
+        result = identify_speakers(self.conn, segments, "/fake/audio.wav", speaker_names=[])
+        self.assertTrue(result["SPEAKER_0"]["matched"])
+        self.assertTrue(result["SPEAKER_1"]["matched"])
+        self.assertTrue(result["SPEAKER_2"]["matched"])
+
+    def test_unmatched_speaker_name_is_original_label_without_filter(self):
+        """Without a filter, unmatched speakers keep original SPEAKER_N label (backward compat)."""
+        from any2md.speaker import identify_speakers
+        conn = _open_test_catalog()  # Empty catalog
+        segments = self._make_segments([("SPEAKER_0", _rand_emb(999))])
+        result = identify_speakers(conn, segments, "/fake/audio.wav")
+        self.assertFalse(result["SPEAKER_0"]["matched"])
+        self.assertEqual(result["SPEAKER_0"]["name"], "SPEAKER_0")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -668,6 +668,7 @@ def match_speaker(
     conn: sqlite3.Connection,
     embedding: np.ndarray,
     threshold: float = 0.55,
+    speaker_ids: Optional[List[str]] = None,
 ) -> Optional[Dict]:
     """Find the best-matching speaker for a query embedding.
 
@@ -685,6 +686,8 @@ def match_speaker(
         embedding: Query 256-d numpy array (will be L2-normalized internally).
         threshold: Maximum cosine distance to accept as a match (default 0.55).
                    Queries returning distance > threshold are rejected (returns None).
+        speaker_ids: Optional list of speaker UUIDs to restrict search to. When
+                     None or empty, all speakers are searched (backward compatible).
 
     Returns:
         Dict with keys {'id', 'name', 'distance', 'enrollment_id'} for the
@@ -692,10 +695,28 @@ def match_speaker(
     """
     query = _l2_normalize(embedding.astype(np.float32))
 
+    # Normalize filter: empty list → None (search all)
+    active_ids: Optional[List[str]] = speaker_ids if speaker_ids else None
+
     # Try sqlite-vec KNN first
     try:
-        results = conn.execute(
+        if active_ids is not None:
+            placeholders = ",".join("?" * len(active_ids))
+            sql = f"""
+            SELECT ve.enrollment_id, ve.distance,
+                   e.speaker_id,
+                   s.name
+            FROM vec_enrollments ve
+            JOIN enrollments e ON e.id = ve.enrollment_id
+            JOIN speakers s ON s.id = e.speaker_id
+            WHERE ve.embedding MATCH ?
+              AND k = 5
+              AND e.speaker_id IN ({placeholders})
+            ORDER BY ve.distance
             """
+            params: List = [_emb_to_blob(query)] + list(active_ids)
+        else:
+            sql = """
             SELECT ve.enrollment_id, ve.distance,
                    e.speaker_id,
                    s.name
@@ -705,9 +726,10 @@ def match_speaker(
             WHERE ve.embedding MATCH ?
               AND k = 5
             ORDER BY ve.distance
-            """,
-            [_emb_to_blob(query)],
-        ).fetchall()
+            """
+            params = [_emb_to_blob(query)]
+
+        results = conn.execute(sql, params).fetchall()
 
         if results:
             best = results[0]
@@ -725,13 +747,14 @@ def match_speaker(
         logger.debug("sqlite-vec KNN failed (%s); falling back to Python centroid search", e)
 
     # Python fallback: compare against stored centroids
-    return _match_speaker_python_fallback(conn, query, threshold)
+    return _match_speaker_python_fallback(conn, query, threshold, speaker_ids=active_ids)
 
 
 def _match_speaker_python_fallback(
     conn: sqlite3.Connection,
     query: np.ndarray,
     threshold: float,
+    speaker_ids: Optional[List[str]] = None,
 ) -> Optional[Dict]:
     """Cosine distance match against all speaker centroids (Python fallback).
 
@@ -742,13 +765,23 @@ def _match_speaker_python_fallback(
         conn: Open catalog connection.
         query: L2-normalized query embedding (256-d float32).
         threshold: Maximum cosine distance to accept.
+        speaker_ids: Optional list of speaker UUIDs to restrict search to. When
+                     None or empty, all speakers are searched.
 
     Returns:
         Best match dict or None.
     """
-    rows = conn.execute(
-        "SELECT id, name, centroid, enrollment_count FROM speakers WHERE enrollment_count > 0"
-    ).fetchall()
+    if speaker_ids:
+        placeholders = ",".join("?" * len(speaker_ids))
+        rows = conn.execute(
+            f"SELECT id, name, centroid, enrollment_count FROM speakers"
+            f" WHERE enrollment_count > 0 AND id IN ({placeholders})",
+            list(speaker_ids),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id, name, centroid, enrollment_count FROM speakers WHERE enrollment_count > 0"
+        ).fetchall()
 
     if not rows:
         return None
@@ -1065,6 +1098,7 @@ def identify_speakers(
     audio_path: str,
     high_conf_threshold: float = 0.15,
     low_conf_threshold: float = 0.30,
+    speaker_names: Optional[List[str]] = None,
 ) -> Dict[str, Dict]:
     """Match diarized speaker labels against the speaker catalog.
 
@@ -1091,17 +1125,40 @@ def identify_speakers(
                              (default 0.15 — tight match, auto-enroll + update stats).
         low_conf_threshold: Cosine distance threshold for flagged match (default 0.30 —
                             match shown with confidence score but no gallery update).
+        speaker_names: Optional list of speaker names to restrict matching to. Names are
+                       resolved to IDs via catalog lookup. Unrecognized names produce a
+                       warning but do not cause an error (partial matches are allowed).
+                       When None or empty, all catalog speakers are searched.
+                       When a filter is active, unmatched speakers are labeled "Unknown"
+                       instead of the raw SPEAKER_N label.
 
     Returns:
         Dict mapping speaker label (e.g. 'SPEAKER_0') to a result dict:
         {
-            'name': str,        # resolved name or original SPEAKER_N label
+            'name': str,        # resolved name or original SPEAKER_N/Unknown label
             'matched': bool,    # True if a catalog match was found
             'distance': float,  # cosine distance (0=identical); None if no match
             'high_conf': bool,  # True if distance <= high_conf_threshold
         }
-        Unmatched speakers have 'matched': False, 'name': original label.
+        Unmatched speakers have 'matched': False.
+        Without filter: 'name' is the original SPEAKER_N label.
+        With filter active: 'name' is 'Unknown' for unmatched speakers.
     """
+    # Resolve speaker_names → speaker_ids
+    filter_active = bool(speaker_names)
+    resolved_ids: Optional[List[str]] = None
+    if filter_active:
+        resolved_ids = []
+        for name in speaker_names:  # type: ignore[union-attr]
+            row = get_speaker_by_name(conn, name)
+            if row is None:
+                logger.warning(
+                    "identify_speakers: speaker name %r not found in catalog — ignoring",
+                    name,
+                )
+            else:
+                resolved_ids.append(row["id"])
+
     # Group segments by unique speaker label
     speaker_segments: Dict[str, List[Dict]] = {}
     for seg in segments:
@@ -1118,8 +1175,9 @@ def identify_speakers(
 
         if avg_embedding is None:
             logger.warning("No valid embeddings for speaker %s — skipping identification", label)
+            unmatched_name = "Unknown" if filter_active else label
             speaker_map[label] = {
-                "name": label,
+                "name": unmatched_name,
                 "matched": False,
                 "distance": None,
                 "high_conf": False,
@@ -1129,11 +1187,14 @@ def identify_speakers(
             continue
 
         # Query catalog for best match using low_conf_threshold as outer gate
-        match = match_speaker(conn, avg_embedding, threshold=low_conf_threshold)
+        match = match_speaker(
+            conn, avg_embedding, threshold=low_conf_threshold, speaker_ids=resolved_ids
+        )
 
         if match is None:
+            unmatched_name = "Unknown" if filter_active else label
             speaker_map[label] = {
-                "name": label,
+                "name": unmatched_name,
                 "matched": False,
                 "distance": None,
                 "high_conf": False,
