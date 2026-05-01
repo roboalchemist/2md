@@ -383,8 +383,21 @@ def segments_to_markdown(sentences: List, title: Optional[str] = None,
     return "\n".join(lines)
 
 
-DEFAULT_DIARIZE_MODEL = "mlx-community/diar_sortformer_4spk-v1-fp32"
-DEFAULT_DIARIZE_CHUNK_DURATION = 10.0  # seconds per chunk for streaming diarization
+DEFAULT_DIARIZE_MODEL = "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16"
+DEFAULT_DIARIZE_CHUNK_DURATION = 10.0  # seconds per chunk; only used for non-streaming models
+
+
+def _is_streaming_diar_model(model_name: str) -> bool:
+    """Return True for streaming-trained Sortformer models.
+
+    Streaming models carry their own Arrival-Order Speaker Cache (AOSC)
+    internally, so they can run over a full clip with bounded memory and
+    keep stable speaker IDs across the whole recording. Wrapping them in
+    application-level `generate_stream(chunk_duration=...)` resets the
+    AOSC every chunk, which causes the same human to be re-numbered across
+    chunks and shows up as 4-way over-segmentation on a 2-person clip.
+    """
+    return "streaming_sortformer" in (model_name or "").lower()
 
 
 def load_diarization_model(model_name: str = DEFAULT_DIARIZE_MODEL):
@@ -395,24 +408,45 @@ def load_diarization_model(model_name: str = DEFAULT_DIARIZE_MODEL):
         logger.error("mlx-audio VAD module required. Install with: uv pip install 'mlx-audio[stt]' yt-dlp")
         raise
     logger.info("Loading diarization model: %s", model_name)
-    return load(model_name)
+    model = load(model_name)
+    # Stash so diarize() can dispatch on the family without us having to
+    # plumb model_name through every call site.
+    setattr(model, "_any2md_model_name", model_name)
+    return model
 
 
 def diarize(audio_path: str, model, chunk_duration: float = DEFAULT_DIARIZE_CHUNK_DURATION):
-    """Run speaker diarization on audio file using streaming to avoid OOM.
+    """Run speaker diarization on audio file.
 
-    Uses generate_stream() to process audio in chunks, avoiding Metal memory
-    allocation failures on long audio files. Collects all chunk results and
-    merges segments across chunk boundaries.
+    Streaming-trained Sortformer models (`diar_streaming_sortformer_*`) are
+    called via `generate()` over the full clip — their internal AOSC cache
+    keeps memory bounded *and* preserves speaker identity across the whole
+    recording. Offline-trained models (`diar_sortformer_*`) get the old
+    `generate_stream(chunk_duration=...)` path so long audio with the fp32
+    model still avoids OOM.
 
     Args:
         audio_path: Path to the audio file.
-        model: Loaded Sortformer diarization model.
-        chunk_duration: Duration of each chunk in seconds (default: 10.0).
+        model: Loaded Sortformer diarization model from `load_diarization_model`.
+        chunk_duration: Chunk size for the offline-model fallback path.
 
     Returns:
         DiarizationOutput with merged speaker segments.
     """
+    model_name = getattr(model, "_any2md_model_name", "") or ""
+
+    if _is_streaming_diar_model(model_name):
+        logger.info("Running diarization on: %s (streaming model, full-clip)", audio_path)
+        start = time.time()
+        result = model.generate(audio_path)
+        elapsed = time.time() - start
+        num_speakers = result.num_speakers or len({s.speaker for s in result.segments})
+        logger.info(
+            "Diarization completed in %.2f seconds (%d segments, %d speakers)",
+            elapsed, len(result.segments), num_speakers,
+        )
+        return result
+
     logger.info("Running diarization on: %s (chunk_duration=%.1fs)", audio_path, chunk_duration)
     start = time.time()
 
