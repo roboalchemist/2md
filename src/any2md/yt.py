@@ -81,6 +81,182 @@ def resolve_model(model_name: str) -> str:
     return MODEL_ALIASES.get(model_name, model_name)
 
 
+# ---------------------------------------------------------------------------
+# Language Identification (LID) constants, loader, and detector
+# ---------------------------------------------------------------------------
+
+LID_MIN_AUDIO_DURATION_S = 5.0        # skip LID below this; default to Parakeet
+LID_SAMPLE_WINDOW_S = 30.0            # Whisper's native window (universal in production)
+LID_CONFIDENCE_THRESHOLD = 0.5        # from faster-whisper's production default
+LID_MAJORITY_VOTE_SEGMENTS = 3        # max segments for majority-vote (future use)
+PARAKEET_LANGS = {"en", "english", "eng"}  # ISO 639-1, full name, ISO 639-2
+DEFAULT_LID_MODEL = "mlx-community/whisper-tiny-mlx"
+
+_lid_model_cache = None  # module-level singleton
+
+
+def _audio_duration_s(wav_path: str) -> float:
+    """Return duration of a WAV file in seconds using stdlib wave."""
+    import wave as _wave
+    try:
+        with _wave.open(wav_path, "rb") as w:
+            return w.getnframes() / w.getframerate()
+    except Exception:
+        return 0.0
+
+
+def _load_lid_model(model_name: str = DEFAULT_LID_MODEL):
+    """Lazy-load and cache the LID (Whisper-tiny) model.
+
+    Returns None if mlx-audio or transformers are unavailable, so callers
+    can fall back to Parakeet without crashing.
+    """
+    global _lid_model_cache
+    if _lid_model_cache is None:
+        try:
+            from mlx_audio.stt import load_model
+        except ImportError:
+            logger.warning("mlx-audio not available — LID disabled; defaulting to Parakeet")
+            return None
+        try:
+            from transformers import WhisperProcessor
+        except ImportError:
+            logger.warning("transformers not available — LID disabled; defaulting to Parakeet")
+            return None
+        try:
+            m = load_model(model_name)
+            # Fallback patch: mlx-community Whisper ports may ship without preprocessor_config.json.
+            # post_load_hook already tries this, but guard against None in case it failed.
+            if getattr(m, "_processor", None) is None:
+                try:
+                    m._processor = WhisperProcessor.from_pretrained("openai/whisper-tiny")
+                except Exception as e:
+                    logger.warning("Could not load WhisperProcessor: %s — LID may be unreliable", e)
+            _lid_model_cache = m
+        except Exception as e:
+            logger.warning("Failed to load LID model %s: %s — defaulting to Parakeet", model_name, e)
+            return None
+    return _lid_model_cache
+
+
+def _detect_language(wav_path: str) -> tuple:
+    """Detect the spoken language in a WAV file.
+
+    Returns (lang_code, confidence) where lang_code is a two-letter ISO 639-1
+    code (e.g. 'en', 'zh') and confidence is in [0.0, 1.0].
+
+    Defaults to ('en', 0.0) on any error, short clip, or silent/empty audio.
+    Whisper internally pads audio to 30s — LID_SAMPLE_WINDOW_S is the window.
+
+    v1: low-confidence → Parakeet (en) as safe fallback.
+    Majority-vote across multiple 30s windows is documented as future work.
+    """
+    try:
+        duration = _audio_duration_s(wav_path)
+        if duration < LID_MIN_AUDIO_DURATION_S:
+            logger.info(
+                "Audio %.1fs < %.1fs minimum — skipping LID, defaulting to Parakeet (en)",
+                duration, LID_MIN_AUDIO_DURATION_S,
+            )
+            return "en", 0.0
+
+        model = _load_lid_model()
+        if model is None:
+            return "en", 0.0
+
+        # Prepare mel spectrogram from the WAV path (uses model._prepare_audio internally)
+        try:
+            from mlx_audio.stt.models.whisper.audio import pad_or_trim, N_FRAMES
+        except ImportError:
+            try:
+                from mlx_audio.stt.models.whisper.whisper import N_FRAMES
+                from mlx_audio.stt.models.whisper.audio import pad_or_trim
+            except ImportError:
+                logger.warning("Cannot import Whisper audio utils — LID disabled")
+                return "en", 0.0
+
+        mel, _content_frames = model._prepare_audio(wav_path)
+        # Trim/pad to a single 30s window (Whisper's native LID window)
+        mel_segment = pad_or_trim(mel, N_FRAMES, axis=-2).astype(model.dtype)
+
+        try:
+            _token, probs = model.detect_language(mel_segment)
+        except Exception as e:
+            logger.warning("LID detection failed: %s — defaulting to Parakeet (en)", e)
+            return "en", 0.0
+
+        # probs is a dict mapping language codes (e.g. "en", "zh") to float probabilities
+        if not isinstance(probs, dict) or not probs:
+            logger.warning("Unexpected LID result shape: %r — defaulting to Parakeet", type(probs))
+            return "en", 0.0
+
+        top_lang = max(probs, key=probs.get)
+        top_prob = probs[top_lang]
+
+        if top_prob >= LID_CONFIDENCE_THRESHOLD:
+            logger.info("Detected language: %s (conf=%.2f)", top_lang, top_prob)
+            return top_lang, top_prob
+
+        # Low confidence — fall back to Parakeet (en)
+        logger.warning(
+            "LID confidence %.2f below threshold %.2f — defaulting to Parakeet (en)",
+            top_prob, LID_CONFIDENCE_THRESHOLD,
+        )
+        return "en", top_prob
+
+    except Exception as e:
+        logger.warning("LID error: %s — defaulting to Parakeet (en)", e)
+        return "en", 0.0
+
+
+def _resolve_language_and_model(
+    audio_path: str,
+    lang_flag: Optional[str],
+    model_flag: Optional[str],
+    yt_metadata: Optional[Dict],
+) -> tuple:
+    """Resolve (language, model) from CLI flags + LID + YouTube metadata.
+
+    Priority:
+      1. Explicit --language (non-None, non-'auto') → use as-is, no LID
+      2. YouTube metadata language field → use as-is, no LID
+      3. Audio LID → detect from audio; low-conf/short → default 'en'
+
+    Then:
+      - Explicit --model (non-None) wins unconditionally
+      - lang in PARAKEET_LANGS → DEFAULT_MODEL (Parakeet)
+      - otherwise → 'qwen3-asr' (bf16 alias from ANY2-30)
+
+    Note: model_flag=None means "user did not pass --model"; model_flag=DEFAULT_MODEL
+    means the user explicitly passed --model parakeet-v3 (or the full ID). Using None
+    as the sentinel is necessary to distinguish "default" from "explicit choice" because
+    DEFAULT_MODEL is also a valid routing target for non-English languages.
+    """
+    # 1. Determine language
+    if lang_flag and lang_flag.lower() != "auto":
+        lang = lang_flag
+    elif yt_metadata and yt_metadata.get("language"):
+        lang = yt_metadata["language"]
+        logger.info("Using YouTube metadata language: %s", lang)
+    else:
+        lang, conf = _detect_language(audio_path)
+        # _detect_language already logged the result
+
+    # 2. Determine model
+    if model_flag is not None:
+        # User explicitly specified --model — respect it unconditionally
+        chosen_model = resolve_model(model_flag)
+    elif lang.lower() in PARAKEET_LANGS:
+        chosen_model = DEFAULT_MODEL  # Parakeet
+    else:
+        chosen_model = "qwen3-asr"   # → bf16 alias from ANY2-30
+
+    if model_flag is None and chosen_model != DEFAULT_MODEL:
+        logger.info("Auto-routing language '%s' → model %s", lang, chosen_model)
+
+    return lang, chosen_model
+
+
 def extract_video_id(url_or_id: str) -> str:
     """
     Extract the YouTube video ID from a URL or return the ID if already provided.
@@ -1064,14 +1240,14 @@ def main(
     input: Annotated[str, typer.Argument(
         help="YouTube URL, video ID (11 chars), or local file path. [dim]Tip: use the video ID or quote URLs to avoid shell glob issues with ? and &.[/dim]",
     )],
-    model: Annotated[str, typer.Option(
+    model: Annotated[Optional[str], typer.Option(
         "--model", "-m",
         help=_model_help,
-    )] = DEFAULT_MODEL,
+    )] = None,
     language: Annotated[Optional[str], typer.Option(
         "--language", "-l",
-        help="Language hint for STT (e.g. 'Chinese', 'English'). Default: auto-detect. Qwen3-ASR supports: Chinese, Cantonese, English, German, Spanish, French, Italian, Portuguese, Russian, Korean, Japanese.",
-    )] = None,
+        help="Language for STT. 'auto' (default) detects from audio via Whisper-tiny LID, then routes to the appropriate model. Pass a name like 'Chinese' or code like 'zh' to skip detection and force a language. Qwen3-ASR supports: Chinese, Cantonese, English, German, Spanish, French, Italian, Portuguese, Russian, Korean, Japanese.",
+    )] = "auto",
     output_dir: Annotated[Path, typer.Option(
         "--output-dir", "-o",
         help="Directory to save output files.",
@@ -1155,6 +1331,19 @@ def main(
                 video_id = None
 
             whisper_audio = convert_audio_for_whisper(audio_file, temp_dir)
+
+            # Auto-detect language + route to the best model.
+            # Priority: explicit --language > YouTube metadata > audio LID > default (en/Parakeet).
+            # model_flag=None means the user did not pass --model, so LID routing is active.
+            resolved_lang, resolved_model = _resolve_language_and_model(
+                whisper_audio,
+                lang_flag=language,   # "auto" or explicit language from --language
+                model_flag=model,     # None unless user passed --model explicitly
+                yt_metadata=metadata if is_youtube else None,
+            )
+            # Use resolved values for transcription
+            language = resolved_lang
+            model = resolved_model
 
             if identify and not diarize_flag:
                 logger.warning("--identify has no effect without --diarize; ignoring")
