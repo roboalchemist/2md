@@ -59,6 +59,10 @@ MODEL_ALIASES = {
     "parakeet-v2": "mlx-community/parakeet-tdt-0.6b-v2",
     "parakeet-1.1b": "mlx-community/parakeet-tdt-1.1b",
     "parakeet-ctc": "mlx-community/parakeet-ctc-0.6b",
+    "qwen3-asr": "mlx-community/Qwen3-ASR-1.7B-bf16",
+    "qwen3-asr-bf16": "mlx-community/Qwen3-ASR-1.7B-bf16",
+    "qwen3-asr-8bit": "mlx-community/Qwen3-ASR-1.7B-8bit",
+    "qwen3-asr-4bit": "mlx-community/Qwen3-ASR-1.7B-4bit",
 }
 
 SUPPORTED_MODELS = [
@@ -66,6 +70,9 @@ SUPPORTED_MODELS = [
     "mlx-community/parakeet-tdt-0.6b-v2",
     "mlx-community/parakeet-tdt-1.1b",
     "mlx-community/parakeet-ctc-0.6b",
+    "mlx-community/Qwen3-ASR-1.7B-bf16",
+    "mlx-community/Qwen3-ASR-1.7B-8bit",
+    "mlx-community/Qwen3-ASR-1.7B-4bit",
 ] + list(MODEL_ALIASES.keys())
 
 
@@ -292,6 +299,20 @@ def _extract_sentence_fields(sentence) -> tuple:
         return sentence["start"], sentence["end"], sentence["text"]
     else:
         return None, None, None
+
+
+def _get_segments(result) -> list:
+    """Extract segment list from an STT result object.
+
+    Handles both:
+      - Parakeet: result.sentences (list of AlignedSentence objects)
+      - Qwen3-ASR: result.segments (list of dicts with start/end/text keys)
+
+    Order is load-bearing: check sentences FIRST. Parakeet's STTOutput also has
+    a .segments field (base class attribute) that may be None or empty, so
+    checking sentences first ensures Parakeet always uses the correct attribute.
+    """
+    return getattr(result, 'sentences', None) or getattr(result, 'segments', None) or []
 
 
 def format_timestamp_srt(seconds: float) -> str:
@@ -709,6 +730,7 @@ def transcribe(
     no_enroll: bool = False,
     _unmatched_out: Optional[List] = None,
     speaker_names: Optional[List[str]] = None,
+    language: Optional[str] = None,
 ) -> str:
     """
     Transcribe audio file using mlx-audio (Parakeet).
@@ -736,12 +758,16 @@ def transcribe(
         speaker_names: Optional list of speaker names to restrict catalog matching to.
             Passed to identify_speakers(speaker_names=...). When None, all catalog
             speakers are searched.
+        language: Optional language hint for STT (e.g. "Chinese", "English"). When set,
+            passed to model.generate(language=...). When None, model auto-detects.
+            Qwen3-ASR supports: Chinese, Cantonese, English, German, Spanish, French,
+            Italian, Portuguese, Russian, Korean, Japanese. Parakeet ignores this via **kwargs.
 
     Returns:
         Path to the generated output file
     """
     try:
-        from mlx_audio.stt import load
+        from mlx_audio.stt import load_model as load
     except ImportError:
         logger.error("mlx-audio is required. Install it with: uv pip install 'mlx-audio[stt]' yt-dlp")
         raise
@@ -770,10 +796,10 @@ def transcribe(
     model = load(model_name)
 
     # Transcribe — mlx-audio handles long audio via chunk_duration internally
-    result = model.generate(
-        audio=audio_file,
-        chunk_duration=chunk_duration,
-    )
+    generate_kwargs: Dict = {"audio": audio_file, "chunk_duration": chunk_duration}
+    if language is not None:
+        generate_kwargs["language"] = language
+    result = model.generate(**generate_kwargs)
 
     end_time = time.time()
     logger.info(f"Transcription completed in {end_time - start_time:.2f} seconds")
@@ -783,7 +809,7 @@ def transcribe(
     if diarize_model_name:
         diar_model = load_diarization_model(diarize_model_name)
         diar_output = diarize(audio_file, diar_model)
-        diarized_segments = align_speakers(result.sentences, diar_output.segments)
+        diarized_segments = align_speakers(_get_segments(result), diar_output.segments)
         num_speakers = diar_output.num_speakers or len({s.speaker for s in diar_output.segments})
         if metadata is not None:
             metadata["speakers"] = num_speakers
@@ -936,11 +962,11 @@ def transcribe(
             content = segments_to_srt_diarized(diarized_segments, speaker_map=speaker_map)
     elif output_format == "md":
         display_title = video_title or os.path.splitext(os.path.basename(audio_file))[0]
-        content = segments_to_markdown(result.sentences, title=display_title, metadata=metadata)
+        content = segments_to_markdown(_get_segments(result), title=display_title, metadata=metadata)
     elif output_format == "txt":
-        content = segments_to_text(result.sentences)
+        content = segments_to_text(_get_segments(result))
     else:
-        content = segments_to_srt(result.sentences)
+        content = segments_to_srt(_get_segments(result))
 
     # Write the output file
     with open(output_file, "w", encoding="utf-8") as f:
@@ -1042,6 +1068,10 @@ def main(
         "--model", "-m",
         help=_model_help,
     )] = DEFAULT_MODEL,
+    language: Annotated[Optional[str], typer.Option(
+        "--language", "-l",
+        help="Language hint for STT (e.g. 'Chinese', 'English'). Default: auto-detect. Qwen3-ASR supports: Chinese, Cantonese, English, German, Spanish, French, Italian, Portuguese, Russian, Korean, Japanese.",
+    )] = None,
     output_dir: Annotated[Path, typer.Option(
         "--output-dir", "-o",
         help="Directory to save output files.",
@@ -1176,6 +1206,7 @@ def main(
                 no_enroll=no_enroll,
                 _unmatched_out=_unmatched if (json_output or is_json_mode()) else None,
                 speaker_names=speaker_names,
+                language=language,
             )
 
             logger.info(f"Transcription completed successfully. Output saved to: {output_file}")

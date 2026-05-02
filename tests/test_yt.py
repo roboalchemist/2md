@@ -656,9 +656,9 @@ class TestTranscribeEnrollmentLogic(unittest.TestCase):
         return model
 
     def _patch_load(self, mock_model):
-        """Return a patcher for mlx_audio.stt.load."""
+        """Return a patcher for mlx_audio.stt.load_model (imported as load in transcribe())."""
         from unittest.mock import patch
-        return patch("mlx_audio.stt.load", return_value=mock_model)
+        return patch("mlx_audio.stt.load_model", return_value=mock_model)
 
     def _run_transcribe(self, tmpdir, speaker_map, auto_enroll=False,
                         no_enroll=False, is_tty=False, prompt_return="",
