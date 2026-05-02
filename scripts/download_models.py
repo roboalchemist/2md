@@ -97,6 +97,29 @@ def _download_stt_model(model_id: str) -> None:
         logger.error(f"  Failed: {e}")
 
 
+def _download_via_snapshot(model_id: str) -> None:
+    """Download a model directly via huggingface_hub snapshot_download.
+
+    Use this for models whose repo names don't match mlx-audio's dispatch
+    registry (e.g. Qwen3-ASR variants whose hyphenated names fail the
+    underscore-keyed registry lookup).  Cache-population is all we need —
+    no model instantiation required.
+    """
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError:
+        logger.error("huggingface_hub is required. Install it with: pip install huggingface-hub")
+        raise
+
+    logger.info(f"Downloading model: {model_id}")
+    start = time.time()
+    try:
+        snapshot_download(repo_id=model_id)
+        logger.info(f"  Ready in {time.time() - start:.2f}s")
+    except Exception as e:
+        logger.error(f"  Failed: {e}")
+
+
 def _download_vlm_model(model_id: str) -> None:
     """Download a single VLM model via mlx-vlm."""
     try:
@@ -215,26 +238,21 @@ def main(
             _download_diarize_model(model_id)
 
     if asr_zh or all_models:
+        # Use snapshot_download directly for all Qwen3 models — mlx-audio's
+        # load_model dispatcher splits on hyphens and looks up underscore-keyed
+        # registry entries (e.g. 'qwen3_asr'), so hyphenated repo names like
+        # 'Qwen3-ASR-1.7B-bf16' yield Model type None and raise ValueError.
         logger.info("--- Qwen3-ASR models (multilingual STT) ---")
         for model_id in QWEN3_ASR_MODELS:
-            _download_stt_model(model_id)
+            _download_via_snapshot(model_id)
 
         logger.info("--- Qwen3-ForcedAligner models ---")
         for model_id in QWEN3_ALIGNER_MODELS:
-            logger.info(f"Downloading aligner model: {model_id}")
-            start = time.time()
-            try:
-                # Use snapshot_download directly — aligner dispatch via load_model
-                # may fail on some mlx-audio versions; cache-population is sufficient.
-                from huggingface_hub import snapshot_download
-                snapshot_download(repo_id=model_id)
-                logger.info(f"  Ready in {time.time() - start:.2f}s")
-            except Exception as e:
-                logger.error(f"  Failed: {e}")
+            _download_via_snapshot(model_id)
 
         logger.info("--- LID models (language detection) ---")
         for model_id in LID_MODELS:
-            _download_stt_model(model_id)
+            _download_via_snapshot(model_id)
 
     logger.info("Done.")
 
