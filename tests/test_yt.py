@@ -26,6 +26,11 @@ from any2md.yt import (
     build_frontmatter,
     resolve_model,
     MODEL_ALIASES,
+    _resolve_language_and_model,
+    DEFAULT_MODEL,
+    PARAKEET_LANGS,
+    LID_MIN_AUDIO_DURATION_S,
+    LID_CONFIDENCE_THRESHOLD,
 )
 
 
@@ -1251,6 +1256,124 @@ class TestSpeakersCliFlag(unittest.TestCase):
             if mock_transcribe.called:
                 _, tkwargs = mock_transcribe.call_args
                 self.assertIsNone(tkwargs.get("speaker_names"))
+
+
+class TestResolveSpeakersArg(unittest.TestCase):
+    """Placeholder — actual TestResolveSpeakersArg tests live in TestSpeakersCliFlag."""
+    pass
+
+
+class TestLanguageDetectionAndRouting(unittest.TestCase):
+    """Unit tests for _resolve_language_and_model and related LID helpers.
+
+    All tests mock _detect_language so no real audio file or LID model is needed.
+    """
+
+    def test_explicit_language_zh_routes_to_qwen3(self):
+        """Explicit --language zh should route to qwen3-asr (non-Parakeet lang)."""
+        lang, model = _resolve_language_and_model("x.wav", "zh", None, None)
+        self.assertEqual(lang, "zh")
+        self.assertIn("qwen3-asr", model)
+
+    def test_explicit_language_en_routes_to_parakeet(self):
+        """Explicit --language en should route to Parakeet (English lang)."""
+        lang, model = _resolve_language_and_model("x.wav", "en", None, None)
+        self.assertEqual(lang, "en")
+        self.assertEqual(model, DEFAULT_MODEL)
+
+    def test_explicit_language_overrides_lid(self):
+        """Explicit --language skips LID entirely — even for non-English."""
+        from unittest.mock import patch
+        with patch("any2md.yt._detect_language") as mock_lid:
+            lang, model = _resolve_language_and_model("x.wav", "zh", None, None)
+            mock_lid.assert_not_called()
+        self.assertEqual(lang, "zh")
+        self.assertIn("qwen3-asr", model)
+
+    def test_auto_language_triggers_lid(self):
+        """'auto' language flag should call _detect_language."""
+        from unittest.mock import patch
+        with patch("any2md.yt._detect_language", return_value=("en", 0.95)) as mock_lid:
+            lang, model = _resolve_language_and_model("x.wav", "auto", None, None)
+            mock_lid.assert_called_once_with("x.wav")
+        self.assertEqual(lang, "en")
+        self.assertEqual(model, DEFAULT_MODEL)
+
+    def test_none_language_triggers_lid(self):
+        """None language flag (treated as auto) should call _detect_language."""
+        from unittest.mock import patch
+        with patch("any2md.yt._detect_language", return_value=("zh", 0.87)) as mock_lid:
+            lang, model = _resolve_language_and_model("x.wav", None, None, None)
+            mock_lid.assert_called_once_with("x.wav")
+        self.assertEqual(lang, "zh")
+        self.assertIn("qwen3-asr", model)
+
+    def test_explicit_model_wins_over_language_routing(self):
+        """Explicit --model should win even when language routes elsewhere.
+
+        Note: model_flag must be non-None to signal 'user passed --model'.
+        DEFAULT_MODEL is a valid explicit model choice.
+        """
+        lang, model = _resolve_language_and_model(
+            "x.wav", "zh", "mlx-community/parakeet-tdt-0.6b-v3", None
+        )
+        self.assertEqual(model, "mlx-community/parakeet-tdt-0.6b-v3")
+        self.assertEqual(lang, "zh")
+
+    def test_explicit_model_alias_wins_over_language_routing(self):
+        """Explicit --model alias should be resolved and win unconditionally."""
+        lang, model = _resolve_language_and_model(
+            "x.wav", "zh", "parakeet-v3", None
+        )
+        # parakeet-v3 resolves to its full ID
+        self.assertEqual(model, "mlx-community/parakeet-tdt-0.6b-v3")
+        self.assertEqual(lang, "zh")
+
+    def test_youtube_metadata_language_used_when_no_explicit_flag(self):
+        """YouTube metadata language field used when no explicit --language."""
+        from unittest.mock import patch
+        with patch("any2md.yt._detect_language") as mock_lid:
+            lang, model = _resolve_language_and_model(
+                "x.wav", None, None, {"language": "zh"}
+            )
+            mock_lid.assert_not_called()  # LID should be skipped
+        self.assertEqual(lang, "zh")
+        self.assertIn("qwen3-asr", model)
+
+    def test_youtube_metadata_english_routes_to_parakeet(self):
+        """YouTube metadata with English routes to Parakeet."""
+        lang, model = _resolve_language_and_model(
+            "x.wav", None, None, {"language": "en"}
+        )
+        self.assertEqual(lang, "en")
+        self.assertEqual(model, DEFAULT_MODEL)
+
+    def test_explicit_language_beats_youtube_metadata(self):
+        """Explicit --language takes precedence over YouTube metadata."""
+        lang, model = _resolve_language_and_model(
+            "x.wav", "zh", None, {"language": "en"}
+        )
+        self.assertEqual(lang, "zh")
+        self.assertIn("qwen3-asr", model)
+
+    def test_parakeet_langs_set_contains_expected_values(self):
+        """PARAKEET_LANGS constant contains all expected English variants."""
+        for lang in ("en", "english", "eng"):
+            self.assertIn(lang, PARAKEET_LANGS)
+
+    def test_lid_min_duration_constant(self):
+        """LID_MIN_AUDIO_DURATION_S is 5.0 per spec."""
+        self.assertEqual(LID_MIN_AUDIO_DURATION_S, 5.0)
+
+    def test_lid_confidence_threshold_constant(self):
+        """LID_CONFIDENCE_THRESHOLD is 0.5 per round-2 strategy."""
+        self.assertEqual(LID_CONFIDENCE_THRESHOLD, 0.5)
+
+    def test_qwen3_asr_alias_resolves_correctly(self):
+        """qwen3-asr alias in MODEL_ALIASES maps to bf16 variant."""
+        from any2md.yt import MODEL_ALIASES
+        self.assertIn("qwen3-asr", MODEL_ALIASES)
+        self.assertIn("bf16", MODEL_ALIASES["qwen3-asr"].lower())
 
 
 if __name__ == "__main__":
