@@ -75,6 +75,153 @@ SUPPORTED_MODELS = [
     "mlx-community/Qwen3-ASR-1.7B-4bit",
 ] + list(MODEL_ALIASES.keys())
 
+# ---------------------------------------------------------------------------
+# Qwen3-ForcedAligner constants, loader, and phrasifier
+# ---------------------------------------------------------------------------
+
+DEFAULT_ALIGNER_MODEL = "mlx-community/Qwen3-ForcedAligner-0.6B-8bit"
+
+# Languages supported by Qwen3-ForcedAligner (ISO 639-1 codes, full names, and
+# regional variants that the model accepts).  Any language NOT in this set will
+# fall back to coarse Qwen3-ASR segment-level timestamps with a logged warning.
+ALIGNER_LANGS = {
+    "zh", "chinese",
+    "en", "english",
+    "yue", "cantonese",
+    "ja", "japanese",
+    "ko", "korean",
+    "ar", "arabic",
+    "fr", "french",
+    "de", "german",
+    "es", "spanish",
+    "pt", "portuguese",
+}
+
+_aligner_model_cache = None  # module-level singleton (keyed implicitly — one aligner at a time)
+
+
+def load_forced_aligner(model_name: str = DEFAULT_ALIGNER_MODEL):
+    """Lazy-load and cache the Qwen3-ForcedAligner model.
+
+    mlx-audio's load_model() may not dispatch correctly on hyphenated HF repo
+    names (ANY2-33 hit a similar issue).  We try load_model first; on
+    ValueError/KeyError we fall back to snapshot_download + retry.
+
+    Returns the loaded model, or None on any failure (callers must fall back
+    gracefully to coarse segments in that case).
+    """
+    global _aligner_model_cache
+    if _aligner_model_cache is not None:
+        return _aligner_model_cache
+
+    try:
+        from mlx_audio.stt import load_model
+    except ImportError:
+        logger.warning("mlx-audio not available — forced aligner disabled")
+        return None
+
+    try:
+        m = load_model(model_name)
+        _aligner_model_cache = m
+        return _aligner_model_cache
+    except (ValueError, KeyError) as e:
+        logger.warning(
+            "Aligner load_model('%s') failed (%s); attempting snapshot_download fallback",
+            model_name, e,
+        )
+    except Exception as e:
+        logger.error("Aligner load failed unexpectedly (%s); skipping forced alignment", e)
+        return None
+
+    # Fallback: download via huggingface_hub and retry
+    try:
+        from huggingface_hub import snapshot_download
+        local_path = snapshot_download(repo_id=model_name)
+        try:
+            m = load_model(local_path)
+            _aligner_model_cache = m
+            return _aligner_model_cache
+        except Exception as e2:
+            logger.error(
+                "Aligner instantiation failed even with local path '%s': %s — skipping",
+                local_path, e2,
+            )
+            return None
+    except Exception as e:
+        logger.error("snapshot_download for aligner failed: %s — skipping", e)
+        return None
+
+
+def _phrasify_word_alignment(words, max_phrase_s: float = 15.0, gap_threshold_s: float = 0.4):
+    """Group word-level aligner output into ~5–15s phrases.
+
+    Breaks on:
+      - Sentence-ending punctuation (CJK + Latin)
+      - Silence gaps > gap_threshold_s between consecutive words
+      - Phrase duration exceeding max_phrase_s
+
+    Args:
+        words: List of word dicts (keys: "start", "end", "text") or objects with
+               .start / .end / .text attributes, as returned by the ForcedAligner.
+        max_phrase_s: Maximum phrase duration in seconds (default: 15.0).
+        gap_threshold_s: Minimum silence gap that triggers a phrase break (default: 0.4s).
+
+    Returns:
+        List of dicts with "start", "end", "text" keys — compatible with
+        _extract_sentence_fields() and align_speakers().
+    """
+    if not words:
+        return []
+
+    # CJK sentence-end + Latin sentence-end + comma as softer fallback
+    PUNCT = set("。！？.!?")
+
+    phrases = []
+    cur: Dict = {"start": None, "end": None, "text": []}
+
+    def flush():
+        nonlocal cur
+        if cur["start"] is not None and cur["text"]:
+            phrases.append({
+                "start": cur["start"],
+                "end": cur["end"],
+                "text": " ".join(cur["text"]).strip(),
+            })
+        cur = {"start": None, "end": None, "text": []}
+
+    prev_end = None
+    for w in words:
+        if hasattr(w, "start"):
+            ws, we, wt = w.start, w.end, w.text
+        else:
+            ws = w.get("start")
+            we = w.get("end")
+            wt = w.get("text", "")
+
+        if ws is None or we is None:
+            continue
+
+        if cur["start"] is None:
+            cur["start"] = ws
+
+        gap = (ws - prev_end) if prev_end is not None else 0.0
+        cur_dur = we - cur["start"]
+
+        if gap > gap_threshold_s or cur_dur > max_phrase_s:
+            flush()
+            cur["start"] = ws
+
+        cur["end"] = we
+        cur["text"].append(wt)
+
+        if wt and wt[-1] in PUNCT:
+            flush()
+
+        prev_end = we
+
+    flush()
+    return phrases
+
 
 def resolve_model(model_name: str) -> str:
     """Resolve a model alias or short name to its full HuggingFace model ID."""
@@ -907,6 +1054,7 @@ def transcribe(
     _unmatched_out: Optional[List] = None,
     speaker_names: Optional[List[str]] = None,
     language: Optional[str] = None,
+    aligner_model: str = DEFAULT_ALIGNER_MODEL,
 ) -> str:
     """
     Transcribe audio file using mlx-audio (Parakeet).
@@ -938,6 +1086,10 @@ def transcribe(
             passed to model.generate(language=...). When None, model auto-detects.
             Qwen3-ASR supports: Chinese, Cantonese, English, German, Spanish, French,
             Italian, Portuguese, Russian, Korean, Japanese. Parakeet ignores this via **kwargs.
+        aligner_model: HuggingFace ID for the Qwen3-ForcedAligner model used to produce
+            word-level timestamps when diarizing with Qwen3-ASR over a supported language.
+            Defaults to DEFAULT_ALIGNER_MODEL. Only used when diarize_model_name is set,
+            model_name is a Qwen3-ASR variant, and language is in ALIGNER_LANGS.
 
     Returns:
         Path to the generated output file
@@ -985,7 +1137,36 @@ def transcribe(
     if diarize_model_name:
         diar_model = load_diarization_model(diarize_model_name)
         diar_output = diarize(audio_file, diar_model)
-        diarized_segments = align_speakers(_get_segments(result), diar_output.segments)
+
+        # For Qwen3-ASR + supported language, use ForcedAligner for word-level timestamps
+        # so that speaker boundaries within a sentence are resolved correctly.
+        # (Qwen3-ASR's native segments are ~30s chunks; Sortformer is fine-grained.)
+        is_qwen3 = "qwen3-asr" in (model_name or "").lower()
+        aligned_segments = None
+        if diarize_model_name and is_qwen3 and language and language.lower() in ALIGNER_LANGS:
+            aligner = load_forced_aligner(aligner_model)
+            if aligner is not None:
+                try:
+                    word_alignment = aligner.generate(audio_file, text=result.text, language=language)
+                    words = getattr(word_alignment, "words", word_alignment)
+                    aligned_segments = _phrasify_word_alignment(words)
+                    logger.info(
+                        "Forced-aligner produced %d phrases (was %d coarse segments)",
+                        len(aligned_segments), len(_get_segments(result)),
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Forced-aligner failed (%s); falling back to coarse segments", e
+                    )
+                    aligned_segments = None
+        elif diarize_model_name and is_qwen3:
+            logger.warning(
+                "Qwen3-ForcedAligner does not support %r; using coarse segment-level "
+                "timestamps for diarization (speaker boundaries will be coarse)", language,
+            )
+
+        segments_for_diarization = aligned_segments if aligned_segments is not None else _get_segments(result)
+        diarized_segments = align_speakers(segments_for_diarization, diar_output.segments)
         num_speakers = diar_output.num_speakers or len({s.speaker for s in diar_output.segments})
         if metadata is not None:
             metadata["speakers"] = num_speakers
@@ -1272,6 +1453,12 @@ def main(
         "--diarize-model",
         help="Sortformer diarization model ID.",
     )] = DEFAULT_DIARIZE_MODEL,
+    aligner_model: Annotated[str, typer.Option(
+        "--aligner-model",
+        help="Forced-aligner model for word-level timestamps (Qwen3-ASR + --diarize only). "
+             "Runs Qwen3-ForcedAligner after transcription to produce fine-grained phrase "
+             "timestamps so Sortformer speaker boundaries align correctly.",
+    )] = DEFAULT_ALIGNER_MODEL,
     identify: Annotated[bool, typer.Option(
         "--identify/--no-identify",
         help="Extract WeSpeaker ResNet293 speaker embeddings per diarized segment. Requires --diarize and any2md[speaker].",
@@ -1396,6 +1583,7 @@ def main(
                 _unmatched_out=_unmatched if (json_output or is_json_mode()) else None,
                 speaker_names=speaker_names,
                 language=language,
+                aligner_model=aligner_model,
             )
 
             logger.info(f"Transcription completed successfully. Output saved to: {output_file}")

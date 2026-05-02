@@ -1376,5 +1376,303 @@ class TestLanguageDetectionAndRouting(unittest.TestCase):
         self.assertIn("bf16", MODEL_ALIASES["qwen3-asr"].lower())
 
 
+class TestPhrasifyWordAlignment(unittest.TestCase):
+    """Unit tests for _phrasify_word_alignment().
+
+    No models or audio files needed — pure logic tests.
+    """
+
+    def test_empty_input_returns_empty_list(self):
+        """Empty word list → empty phrase list."""
+        from any2md.yt import _phrasify_word_alignment
+        result = _phrasify_word_alignment([])
+        self.assertEqual(result, [])
+
+    def test_single_word(self):
+        """Single word produces a single phrase."""
+        from any2md.yt import _phrasify_word_alignment
+        words = [{"start": 0.0, "end": 0.5, "text": "Hello"}]
+        result = _phrasify_word_alignment(words)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["text"], "Hello")
+        self.assertAlmostEqual(result[0]["start"], 0.0)
+        self.assertAlmostEqual(result[0]["end"], 0.5)
+
+    def test_punctuation_triggers_flush(self):
+        """Sentence-ending punctuation causes a phrase break."""
+        from any2md.yt import _phrasify_word_alignment
+        words = [
+            {"start": 0.0, "end": 0.5, "text": "Hello."},
+            {"start": 0.5, "end": 1.0, "text": "World."},
+        ]
+        result = _phrasify_word_alignment(words)
+        # Each word ends with punctuation → 2 separate phrases
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["text"], "Hello.")
+        self.assertEqual(result[1]["text"], "World.")
+
+    def test_cjk_punctuation_triggers_flush(self):
+        """CJK sentence-ending punctuation (。！？) also causes a break."""
+        from any2md.yt import _phrasify_word_alignment
+        words = [
+            {"start": 0.0, "end": 0.5, "text": "你好。"},
+            {"start": 0.5, "end": 1.0, "text": "再见。"},
+        ]
+        result = _phrasify_word_alignment(words)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["text"], "你好。")
+        self.assertEqual(result[1]["text"], "再见。")
+
+    def test_silence_gap_triggers_flush(self):
+        """Silence gap > 0.4s between words triggers a phrase break."""
+        from any2md.yt import _phrasify_word_alignment
+        words = [
+            {"start": 0.0, "end": 0.5, "text": "first"},
+            # 1.0s gap → new phrase
+            {"start": 1.5, "end": 2.0, "text": "second"},
+        ]
+        result = _phrasify_word_alignment(words)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["text"], "first")
+        self.assertEqual(result[1]["text"], "second")
+
+    def test_small_gap_does_not_flush(self):
+        """Silence gap ≤ 0.4s does NOT trigger a phrase break."""
+        from any2md.yt import _phrasify_word_alignment
+        words = [
+            {"start": 0.0, "end": 0.5, "text": "first"},
+            # 0.3s gap — under threshold
+            {"start": 0.8, "end": 1.3, "text": "second"},
+        ]
+        result = _phrasify_word_alignment(words)
+        self.assertEqual(len(result), 1)
+        self.assertIn("first", result[0]["text"])
+        self.assertIn("second", result[0]["text"])
+
+    def test_max_duration_cap_triggers_flush(self):
+        """Phrase exceeding max_phrase_s (15s) gets split."""
+        from any2md.yt import _phrasify_word_alignment
+        # Generate 20 words each 1 second apart — phrase should break at 15s
+        words = [{"start": float(i), "end": float(i) + 0.8, "text": f"word{i}"} for i in range(20)]
+        result = _phrasify_word_alignment(words)
+        # With default max_phrase_s=15.0, we expect at least 2 phrases
+        self.assertGreater(len(result), 1)
+        # Each phrase should be ≤ 15s (allowing small float tolerance)
+        for phrase in result:
+            self.assertLessEqual(phrase["end"] - phrase["start"], 15.0 + 0.1)
+
+    def test_attribute_style_words(self):
+        """Words passed as objects with .start/.end/.text attributes are handled."""
+        from any2md.yt import _phrasify_word_alignment
+
+        class Word:
+            def __init__(self, start, end, text):
+                self.start = start
+                self.end = end
+                self.text = text
+
+        # Both words within the gap threshold (0.1s gap) → one phrase
+        # "World." ends with '.' → flushes the phrase
+        words = [
+            Word(0.0, 0.5, "Hello"),
+            Word(0.6, 1.0, "World."),
+        ]
+        result = _phrasify_word_alignment(words)
+        # "Hello" + "World." in the same phrase (gap=0.1s < 0.4s), flushed on '.'
+        self.assertEqual(len(result), 1)
+        self.assertIn("Hello", result[0]["text"])
+        self.assertIn("World.", result[0]["text"])
+
+    def test_output_schema(self):
+        """Each output dict has start, end, text keys with correct types."""
+        from any2md.yt import _phrasify_word_alignment
+        words = [{"start": 0.0, "end": 1.0, "text": "test"}]
+        result = _phrasify_word_alignment(words)
+        self.assertEqual(len(result), 1)
+        p = result[0]
+        self.assertIn("start", p)
+        self.assertIn("end", p)
+        self.assertIn("text", p)
+        self.assertIsInstance(p["start"], float)
+        self.assertIsInstance(p["end"], float)
+        self.assertIsInstance(p["text"], str)
+
+
+class TestForcedAlignerConstants(unittest.TestCase):
+    """Tests for the aligner constants and their values."""
+
+    def test_default_aligner_model_is_set(self):
+        """DEFAULT_ALIGNER_MODEL is defined and contains 'ForcedAligner'."""
+        from any2md.yt import DEFAULT_ALIGNER_MODEL
+        self.assertIsInstance(DEFAULT_ALIGNER_MODEL, str)
+        self.assertIn("ForcedAligner", DEFAULT_ALIGNER_MODEL)
+
+    def test_aligner_langs_contains_required_values(self):
+        """ALIGNER_LANGS contains at least the 11 core language entries."""
+        from any2md.yt import ALIGNER_LANGS
+        required = {"zh", "chinese", "en", "english", "ja", "ko", "ar", "fr", "de", "es", "pt"}
+        for lang in required:
+            self.assertIn(lang, ALIGNER_LANGS, f"Missing expected language: {lang}")
+
+    def test_aligner_langs_includes_aliases(self):
+        """ALIGNER_LANGS includes full-name aliases alongside codes."""
+        from any2md.yt import ALIGNER_LANGS
+        aliases = {"japanese", "korean", "arabic", "french", "german", "spanish", "portuguese",
+                   "yue", "cantonese"}
+        for alias in aliases:
+            self.assertIn(alias, ALIGNER_LANGS, f"Missing expected alias: {alias}")
+
+
+class TestForcedAlignerOutOfCoverage(unittest.TestCase):
+    """Tests for the out-of-coverage language fallback in transcribe().
+
+    Verifies that when language is NOT in ALIGNER_LANGS and Qwen3-ASR is used
+    with --diarize, we log a warning and fall back to coarse _get_segments().
+    No real models or audio files needed.
+    """
+
+    def _make_fake_result(self):
+        """Return a minimal fake STT result object."""
+        from unittest.mock import MagicMock
+        r = MagicMock()
+        r.text = "Namaste"
+        r.sentences = [{"start": 0.0, "end": 2.0, "text": "Namaste"}]
+        return r
+
+    def test_out_of_coverage_language_warns_and_does_not_call_aligner(self):
+        """When language='hi' (Hindi, not in ALIGNER_LANGS), aligner is NOT called."""
+        from unittest.mock import patch, MagicMock
+        import tempfile, os
+        from any2md.yt import transcribe, DEFAULT_DIARIZE_MODEL
+
+        fake_result = self._make_fake_result()
+        fake_stt_model = MagicMock()
+        fake_stt_model.generate.return_value = fake_result
+
+        # Fake diarization output
+        fake_diar_seg = MagicMock()
+        fake_diar_seg.start = 0.0
+        fake_diar_seg.end = 2.0
+        fake_diar_seg.speaker = 0
+        fake_diar_output = MagicMock()
+        fake_diar_output.segments = [fake_diar_seg]
+        fake_diar_output.num_speakers = 1
+
+        fake_diar_model = MagicMock()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio_path = os.path.join(tmpdir, "test.wav")
+            open(audio_path, "w").close()
+
+            with patch("mlx_audio.stt.load_model", return_value=fake_stt_model), \
+                 patch("any2md.yt.load_diarization_model", return_value=fake_diar_model), \
+                 patch("any2md.yt.diarize", return_value=fake_diar_output), \
+                 patch("any2md.yt.load_forced_aligner") as mock_aligner_loader, \
+                 patch("any2md.yt.logger") as mock_logger:
+
+                transcribe(
+                    audio_path,
+                    model_name="mlx-community/Qwen3-ASR-1.7B-bf16",
+                    output_dir=tmpdir,
+                    diarize_model_name=DEFAULT_DIARIZE_MODEL,
+                    language="hi",  # Hindi — NOT in ALIGNER_LANGS
+                )
+
+            # Aligner loader should NOT be called for out-of-coverage language
+            mock_aligner_loader.assert_not_called()
+
+            # Warning should have been logged about unsupported language
+            warning_calls = [str(c) for c in mock_logger.warning.call_args_list]
+            self.assertTrue(
+                any("does not support" in c or "hi" in c or "coarse" in c for c in warning_calls),
+                f"Expected 'does not support' warning for Hindi; got: {warning_calls}",
+            )
+
+    def test_in_coverage_language_does_call_aligner(self):
+        """When language='zh' (in ALIGNER_LANGS), load_forced_aligner IS called."""
+        from unittest.mock import patch, MagicMock
+        import tempfile, os
+        from any2md.yt import transcribe, DEFAULT_DIARIZE_MODEL
+
+        fake_result = self._make_fake_result()
+        fake_result.text = "你好"
+        fake_stt_model = MagicMock()
+        fake_stt_model.generate.return_value = fake_result
+
+        fake_diar_seg = MagicMock()
+        fake_diar_seg.start = 0.0
+        fake_diar_seg.end = 2.0
+        fake_diar_seg.speaker = 0
+        fake_diar_output = MagicMock()
+        fake_diar_output.segments = [fake_diar_seg]
+        fake_diar_output.num_speakers = 1
+
+        fake_aligner = MagicMock()
+        # aligner.generate returns something with words = list of dicts
+        fake_aligner.generate.return_value = MagicMock(words=[
+            {"start": 0.0, "end": 1.0, "text": "你好"}
+        ])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio_path = os.path.join(tmpdir, "test.wav")
+            open(audio_path, "w").close()
+
+            with patch("mlx_audio.stt.load_model", return_value=fake_stt_model), \
+                 patch("any2md.yt.load_diarization_model", return_value=MagicMock()), \
+                 patch("any2md.yt.diarize", return_value=fake_diar_output), \
+                 patch("any2md.yt.load_forced_aligner", return_value=fake_aligner) as mock_loader:
+
+                transcribe(
+                    audio_path,
+                    model_name="mlx-community/Qwen3-ASR-1.7B-bf16",
+                    output_dir=tmpdir,
+                    diarize_model_name=DEFAULT_DIARIZE_MODEL,
+                    language="zh",  # Chinese — in ALIGNER_LANGS
+                )
+
+            # Aligner loader SHOULD be called
+            mock_loader.assert_called_once()
+            # And aligner.generate SHOULD be called
+            fake_aligner.generate.assert_called_once()
+
+    def test_parakeet_model_never_calls_aligner(self):
+        """Parakeet (non-qwen3) + diarize should never invoke the aligner."""
+        from unittest.mock import patch, MagicMock
+        import tempfile, os
+        from any2md.yt import transcribe, DEFAULT_MODEL, DEFAULT_DIARIZE_MODEL
+
+        fake_result = self._make_fake_result()
+        fake_result.sentences = [{"start": 0.0, "end": 2.0, "text": "Hello"}]
+        fake_stt_model = MagicMock()
+        fake_stt_model.generate.return_value = fake_result
+
+        fake_diar_seg = MagicMock()
+        fake_diar_seg.start = 0.0
+        fake_diar_seg.end = 2.0
+        fake_diar_seg.speaker = 0
+        fake_diar_output = MagicMock()
+        fake_diar_output.segments = [fake_diar_seg]
+        fake_diar_output.num_speakers = 1
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio_path = os.path.join(tmpdir, "test.wav")
+            open(audio_path, "w").close()
+
+            with patch("mlx_audio.stt.load_model", return_value=fake_stt_model), \
+                 patch("any2md.yt.load_diarization_model", return_value=MagicMock()), \
+                 patch("any2md.yt.diarize", return_value=fake_diar_output), \
+                 patch("any2md.yt.load_forced_aligner") as mock_aligner_loader:
+
+                transcribe(
+                    audio_path,
+                    model_name=DEFAULT_MODEL,  # Parakeet — "qwen3-asr" NOT in name
+                    output_dir=tmpdir,
+                    diarize_model_name=DEFAULT_DIARIZE_MODEL,
+                    language="en",
+                )
+
+            mock_aligner_loader.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
