@@ -6,11 +6,12 @@ Downloads and caches models from HuggingFace so they are available for fast
 startup in subsequent runs.
 
 Usage:
-    python download_models.py            # download all models
+    python download_models.py            # download all models (~15+ GB)
     python download_models.py --stt      # Parakeet STT models only
     python download_models.py --vlm      # Qwen3.5-27B VLM model only
     python download_models.py --reader   # ReaderLM-v2 only
     python download_models.py --docling  # SmolDocling-256M only
+    python download_models.py --asr-zh   # Qwen3-ASR + ForcedAligner (~9.4 GB)
 """
 
 import logging
@@ -55,6 +56,22 @@ DIARIZE_MODELS = [
     "mlx-community/diar_sortformer_4spk-v1-fp32",
 ]
 
+# Qwen3-ASR models (Chinese / multilingual STT)
+QWEN3_ASR_MODELS = [
+    "mlx-community/Qwen3-ASR-1.7B-bf16",   # default alias from ANY2-30
+    "mlx-community/Qwen3-ASR-1.7B-8bit",
+    "mlx-community/Qwen3-ASR-1.7B-4bit",
+]
+
+# Qwen3-ForcedAligner models
+QWEN3_ALIGNER_MODELS = [
+    "mlx-community/Qwen3-ForcedAligner-0.6B-8bit",
+]
+
+# LID (Language Identification) models
+# TODO: ANY2-29 — fill in once LID model is chosen
+LID_MODELS: list[str] = []
+
 app = typer.Typer(
     help="Download MLX models for 2md tools.",
     add_completion=False,
@@ -66,7 +83,7 @@ app = typer.Typer(
 def _download_stt_model(model_id: str) -> None:
     """Download a single STT model via mlx-audio."""
     try:
-        from mlx_audio.stt import load
+        from mlx_audio.stt import load_model
     except ImportError:
         logger.error("mlx-audio[stt] is required. Install it with: pip install mlx-audio[stt]")
         raise
@@ -74,7 +91,30 @@ def _download_stt_model(model_id: str) -> None:
     logger.info(f"Downloading STT model: {model_id}")
     start = time.time()
     try:
-        load(model_id)
+        load_model(model_id)
+        logger.info(f"  Ready in {time.time() - start:.2f}s")
+    except Exception as e:
+        logger.error(f"  Failed: {e}")
+
+
+def _download_via_snapshot(model_id: str) -> None:
+    """Download a model directly via huggingface_hub snapshot_download.
+
+    Use this for models whose repo names don't match mlx-audio's dispatch
+    registry (e.g. Qwen3-ASR variants whose hyphenated names fail the
+    underscore-keyed registry lookup).  Cache-population is all we need —
+    no model instantiation required.
+    """
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError:
+        logger.error("huggingface_hub is required. Install it with: pip install huggingface-hub")
+        raise
+
+    logger.info(f"Downloading model: {model_id}")
+    start = time.time()
+    try:
+        snapshot_download(repo_id=model_id)
         logger.info(f"  Ready in {time.time() - start:.2f}s")
     except Exception as e:
         logger.error(f"  Failed: {e}")
@@ -153,6 +193,10 @@ def main(
         "--diarize",
         help="Download Sortformer diarization model.",
     )] = False,
+    asr_zh: Annotated[bool, typer.Option(
+        "--asr-zh",
+        help="Download Qwen3-ASR-1.7B + ForcedAligner + LID model for Chinese/multilingual (~9.4 GB).",
+    )] = False,
     all_models: Annotated[bool, typer.Option(
         "--all",
         help="Download all models.",
@@ -165,7 +209,7 @@ def main(
     to download only the models needed for specific tools.
     """
     # If no flags, download all
-    if not any([stt, vlm, reader, docling, diarize, all_models]):
+    if not any([stt, vlm, reader, docling, diarize, asr_zh, all_models]):
         all_models = True
 
     if stt or all_models:
@@ -192,6 +236,23 @@ def main(
         logger.info("--- Diarization models (Sortformer) ---")
         for model_id in DIARIZE_MODELS:
             _download_diarize_model(model_id)
+
+    if asr_zh or all_models:
+        # Use snapshot_download directly for all Qwen3 models — mlx-audio's
+        # load_model dispatcher splits on hyphens and looks up underscore-keyed
+        # registry entries (e.g. 'qwen3_asr'), so hyphenated repo names like
+        # 'Qwen3-ASR-1.7B-bf16' yield Model type None and raise ValueError.
+        logger.info("--- Qwen3-ASR models (multilingual STT) ---")
+        for model_id in QWEN3_ASR_MODELS:
+            _download_via_snapshot(model_id)
+
+        logger.info("--- Qwen3-ForcedAligner models ---")
+        for model_id in QWEN3_ALIGNER_MODELS:
+            _download_via_snapshot(model_id)
+
+        logger.info("--- LID models (language detection) ---")
+        for model_id in LID_MODELS:
+            _download_via_snapshot(model_id)
 
     logger.info("Done.")
 
