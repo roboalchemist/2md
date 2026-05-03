@@ -1403,14 +1403,16 @@ class OutputFormat(str, Enum):
 
 
 # Build model help text
-_model_help_lines = "\n".join(f"  {alias} → {full}" for alias, full in MODEL_ALIASES.items())
 _model_help = (
     "Model for transcription. Accepts a full HuggingFace ID or a short alias.\n\n"
-    "Aliases:\n" + _model_help_lines
+    "English (fast):\n"
+    "  parakeet-v3, parakeet-v2, parakeet-1.1b, parakeet-ctc\n\n"
+    "Multilingual (30 languages incl. Chinese):\n"
+    "  qwen3-asr (alias of qwen3-asr-bf16), qwen3-asr-bf16, qwen3-asr-8bit, qwen3-asr-4bit"
 )
 
 app = typer.Typer(
-    help="Transcribe YouTube videos, audio, or video files to markdown, SRT, or plain text using mlx-audio (Parakeet).",
+    help="Transcribe YouTube videos, audio, or video files to markdown, SRT, or plain text using mlx-audio (Parakeet for English; Qwen3-ASR for multilingual).",
     rich_markup_mode="rich",
     no_args_is_help=True,
 )

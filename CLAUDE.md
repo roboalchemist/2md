@@ -136,7 +136,7 @@ repo.py: git dir → repomix CLI → markdown with file stats frontmatter
 
 | Module | Key Function | External Dep | Notes |
 |--------|-------------|-------------|-------|
-| `yt.py` | `transcribe_audio_via_mlx()` | mlx-audio, yt-dlp, ffmpeg | Supports diarization, SRT output, speaker identification |
+| `yt.py` | `transcribe_audio_via_mlx()` | mlx-audio, yt-dlp, ffmpeg | Supports diarization, SRT output, speaker identification; multilingual via Qwen3-ASR-1.7B |
 | `pdf.py` | `process_pdf_file()` | pymupdf4llm, mlx-vlm | Auto-fallback OCR when < 50 chars/page |
 | `img.py` | `process_image_file()` | mlx-vlm (Qwen3.5) | Supports JPEG, PNG, GIF, BMP, WebP, TIFF |
 | `web.py` | `html_to_markdown()` | mlx-lm (ReaderLM-v2), httpx | 200K char limit, 8192 max output tokens |
@@ -159,12 +159,14 @@ repo.py: git dir → repomix CLI → markdown with file stats frontmatter
 
 | Model | Library | Default HF ID | Use |
 |-------|---------|--------------|-----|
-| Parakeet v3 | mlx-audio | `mlx-community/parakeet-tdt-0.6b-v3` | Audio/video STT |
+| Parakeet v3 | mlx-audio | `mlx-community/parakeet-tdt-0.6b-v3` | Audio/video STT (English) |
+| Qwen3-ASR-1.7B | mlx-audio | `mlx-community/Qwen3-ASR-1.7B-bf16` | Multilingual STT (30 langs) |
+| Qwen3-ForcedAligner | mlx-audio | `mlx-community/Qwen3-ForcedAligner-0.6B-8bit` | Word-level alignment for diarization |
 | Sortformer | mlx-audio | (auto-configured) | Speaker diarization |
 | ReaderLM-v2 | mlx-lm | `mlx-community/jinaai-ReaderLM-v2` | HTML/web → markdown |
 | Qwen3.5-9B | mlx-vlm | `mlx-community/Qwen3.5-9B-MLX-4bit` | Image OCR, PDF OCR |
 
-**Model aliases in `yt.py`**: `parakeet-v3`, `parakeet-v2`, `parakeet-1.1b`, `parakeet-ctc`
+**Model aliases in `yt.py`** — English (fast): `parakeet-v3`, `parakeet-v2`, `parakeet-1.1b`, `parakeet-ctc`; Multilingual (Qwen3-ASR): `qwen3-asr` (alias of `qwen3-asr-bf16`), `qwen3-asr-bf16`, `qwen3-asr-8bit`, `qwen3-asr-4bit`
 **Model aliases in `img.py` / `pdf.py`**: `qwen3.5-4b`, `qwen3.5-9b` (default), `qwen3.5-27b`, `qwen3.5-35b`, `smoldocling`
 
 ## Installation
@@ -219,8 +221,8 @@ python scripts/download_models.py --all      # Everything
 any2md <input>
 
 # Explicit subcommands
-any2md yt <input>  [--model NAME] [--diarize] [--format md|srt|txt] [--chunk-duration FLOAT] [--keep-audio]
-                   [--identify] [--auto-enroll] [--no-enroll]
+any2md yt <input>  [--model NAME] [--language LANG] [--diarize] [--format md|srt|txt] [--chunk-duration FLOAT] [--keep-audio]
+                   [--aligner-model NAME] [--identify] [--auto-enroll] [--no-enroll]
 any2md pdf <input> [--pages "1-10,15"] [--ocr] [--model NAME]
 any2md img <input> [--model NAME]
 any2md web <url>
@@ -274,4 +276,4 @@ any2md completion fish      # Output fish completion script
 
 ## Project History
 
-Originally `yt2srt` on `lightning-whisper-mlx`. Migrated to `yt2md` on `mlx-audio` with Parakeet, rewritten from argparse to typer. Then expanded from 2 tools (yt2md + pdf2md) to 20 converters as a proper Python package (`src/any2md/`) with unified CLI, optional dependency groups, and 808 tests. v0.2.0 added quality & polish pass; v0.2.3 added `repo` subcommand via repomix; v0.3.0 added `speaker` catalog, `docs`/`completion` subcommands, `--silent` flag, and `--identify`/`--auto-enroll`/`--no-enroll` flags on `yt`.
+Originally `yt2srt` on `lightning-whisper-mlx`. Migrated to `yt2md` on `mlx-audio` with Parakeet, rewritten from argparse to typer. Then expanded from 2 tools (yt2md + pdf2md) to 20 converters as a proper Python package (`src/any2md/`) with unified CLI, optional dependency groups, and 808 tests. v0.2.0 added quality & polish pass; v0.2.3 added `repo` subcommand via repomix; v0.3.0 added `speaker` catalog, `docs`/`completion` subcommands, `--silent` flag, and `--identify`/`--auto-enroll`/`--no-enroll` flags on `yt`; v0.3.4 added Qwen3-ASR-1.7B multilingual STT + Whisper-tiny LID auto-routing + `--language` / `--aligner-model` flags (ANY2-28 series).
