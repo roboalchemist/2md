@@ -10,7 +10,8 @@
 
 ```bash
 # Auto-detect — just pass any file, URL, or git directory
-any2md lecture.mp4                         # audio/video → markdown (Parakeet STT)
+any2md lecture.mp4                         # audio/video → markdown (Parakeet STT for English; Qwen3-ASR for multilingual)
+any2md interview_zh.mp3 --diarize          # Chinese/multilingual — language auto-detected
 any2md podcast.mp3 --diarize               # with speaker diarization
 any2md document.pdf                        # PDF → markdown
 any2md screenshot.png                      # image → markdown (Qwen VLM OCR)
@@ -41,9 +42,12 @@ any2md yt <input>
   # Transcribe audio/video to markdown, SRT, or plain text.
   # Accepts YouTube URLs, YouTube video IDs (11 chars), or local audio/video files.
   # Aliases: audio (MP3/WAV/FLAC/OGG/AAC/M4A), video (MP4/MKV/AVI/MOV/WebM)
+  # Language auto-detected via Whisper-tiny LID; routes to Parakeet (English) or Qwen3-ASR (other).
   # Requires: mlx-audio[stt], yt-dlp (YouTube), ffmpeg
-  --model NAME             # Parakeet alias or HuggingFace ID (default: parakeet-v3)
+  --model NAME             # English: parakeet-v3/v2/1.1b/ctc; Multilingual: qwen3-asr (alias of qwen3-asr-bf16), qwen3-asr-bf16/8bit/4bit
+  --language LANG          # Language code or name (default: 'auto' — detect from audio). E.g. 'zh', 'Chinese', 'ja'.
   --diarize                # Enable Sortformer speaker diarization
+  --aligner-model NAME     # Forced-aligner for word timestamps (Qwen3-ASR + --diarize only)
   --format md|srt|txt      # Output format (default: md)
   --chunk-duration SECS    # Split long audio into chunks
   --keep-audio             # Keep downloaded audio file

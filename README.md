@@ -67,9 +67,9 @@ any2md nb notebook.ipynb --no-outputs
 
 | Subcommand | Input | Engine | Dependencies |
 |------------|-------|--------|-------------|
-| `audio` | MP3, WAV, FLAC, OGG, AAC, M4A | Parakeet STT + Sortformer diarization | mlx-audio |
-| `video` | MP4, MKV, AVI, MOV, WebM | Parakeet STT + Sortformer diarization | mlx-audio |
-| `yt` | YouTube URLs + all audio/video | Parakeet STT + yt-dlp download | mlx-audio, yt-dlp |
+| `audio` | MP3, WAV, FLAC, OGG, AAC, M4A | Parakeet STT (English) / Qwen3-ASR (multilingual) + Sortformer diarization | mlx-audio |
+| `video` | MP4, MKV, AVI, MOV, WebM | Parakeet STT (English) / Qwen3-ASR (multilingual) + Sortformer diarization | mlx-audio |
+| `yt` | YouTube URLs + all audio/video | Parakeet STT (English) / Qwen3-ASR (multilingual) + yt-dlp download | mlx-audio, yt-dlp |
 | `pdf` | PDF files | pymupdf4llm + optional Qwen3.5 VLM OCR | pymupdf4llm |
 | `img` | JPEG, PNG, GIF, BMP, WebP, TIFF | Qwen3.5 (mlx-vlm) | mlx-vlm |
 | `web` | Web URLs | ReaderLM-v2 (mlx-lm) | mlx-lm |
@@ -119,12 +119,30 @@ All tools produce YAML frontmatter with source metadata followed by the converte
 ## Pre-download AI models
 
 ```bash
-python scripts/download_models.py --stt       # Parakeet (audio/video)
+python scripts/download_models.py --stt       # Parakeet (audio/video, English)
+python scripts/download_models.py --asr-zh    # Qwen3-ASR + ForcedAligner + LID (~9.4 GB, multilingual)
 python scripts/download_models.py --diarize   # Sortformer (--diarize)
 python scripts/download_models.py --vlm       # Qwen3.5 (img, pdf --ocr)
 python scripts/download_models.py --reader    # ReaderLM-v2 (web, html)
 python scripts/download_models.py --all       # Everything
 ```
+
+## Multilingual transcription
+
+any2md supports 30+ languages via Qwen3-ASR-1.7B. By default, language is auto-detected from audio using a Whisper-tiny language identification model — no flag needed.
+
+```bash
+# Auto-detects language — Chinese, Japanese, Korean, German, French, and 25 more
+any2md interview_zh.mp3 --diarize --identify
+
+# Override language explicitly (skips auto-detection)
+any2md lecture.mp4 --language zh
+
+# English-only fast path (Parakeet)
+any2md podcast.mp3 --language en
+```
+
+Supported languages: Chinese, Cantonese, English, German, Spanish, French, Italian, Portuguese, Russian, Korean, Japanese (and more via `--language` code). Pass `--language auto` (default) to let the model detect automatically.
 
 ## Requirements
 
