@@ -44,6 +44,10 @@ READERLM_MODEL = "mlx-community/jinaai-ReaderLM-v2"
 QWEN_VL_MODEL = "mlx-community/Qwen3.5-4B-MLX-4bit"
 PARAKEET_MODEL = "mlx-community/parakeet-tdt-0.6b-v3"
 SORTFORMER_MODEL = "mlx-community/diar_sortformer_4spk-v1-fp32"
+# Qwen3-ASR — smallest quantised variant for fast test runs
+QWEN3_ASR_MODEL = "mlx-community/Qwen3-ASR-1.7B-4bit"
+ZH_SHORT_AUDIO = Path(__file__).parent / "audio" / "zh_short.wav"
+ZH_TWO_SPEAKERS_AUDIO = Path(__file__).parent / "audio" / "zh_two_speakers.wav"
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +348,59 @@ def test_diarize_end_to_end_youtube():
     text_lines = [line for line in content.split("\n") if line.strip() and not line.startswith("---") and not line.startswith("**") and not line.startswith("#") and ":" not in line[:20]]
     total_text = " ".join(text_lines)
     assert len(total_text) > 100, "Expected substantial transcription text"
+
+
+# ---------------------------------------------------------------------------
+# Qwen3-ASR — Chinese-language STT
+# ---------------------------------------------------------------------------
+
+@pytest.mark.slow
+def test_qwen3_asr_zh_transcription():
+    """Qwen3-ASR transcribes Mandarin Chinese audio and returns CJK characters.
+
+    zh_short.wav is a ~6s Mandarin speech clip (MIT-licensed, from F5-TTS
+    basic_ref_zh.wav). Qwen3-ASR-1.7B-4bit is used for speed; the output
+    must contain at least one CJK Unified Ideograph codepoint.
+    """
+    if not ZH_SHORT_AUDIO.exists():
+        pytest.skip(f"zh_short.wav not found: {ZH_SHORT_AUDIO}")
+
+    from any2md.yt import transcribe, resolve_model
+
+    model_id = resolve_model("qwen3-asr-4bit")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_path = transcribe(
+            str(ZH_SHORT_AUDIO), model_id, output_dir=tmpdir, language="Chinese"
+        )
+        content = Path(output_path).read_text(encoding="utf-8")
+
+    assert len(content) > 20, f"Qwen3-ASR returned empty/short output for zh_short.wav: {repr(content)}"
+    # CJK Unified Ideographs: U+4E00–U+9FFF
+    has_cjk = any("一" <= ch <= "鿿" for ch in content)
+    assert has_cjk, f"Expected CJK characters in Chinese transcript, got: {repr(content[:300])}"
+
+
+@pytest.mark.slow
+def test_qwen3_asr_auto_routing():
+    """LID auto-routing selects Qwen3-ASR when input is Mandarin Chinese.
+
+    _resolve_language_and_model() runs whisper-tiny LID on zh_short.wav,
+    detects 'zh', and returns the Qwen3-ASR bf16 model id.
+    """
+    if not ZH_SHORT_AUDIO.exists():
+        pytest.skip(f"zh_short.wav not found: {ZH_SHORT_AUDIO}")
+
+    from any2md.yt import _resolve_language_and_model
+
+    lang, model_id = _resolve_language_and_model(
+        str(ZH_SHORT_AUDIO), lang_flag=None, model_flag=None, yt_metadata=None
+    )
+
+    assert lang == "zh", f"Expected LID to detect 'zh', got {repr(lang)}"
+    assert "qwen3" in model_id.lower() or "asr" in model_id.lower(), (
+        f"Expected Qwen3-ASR model to be selected for Chinese, got: {repr(model_id)}"
+    )
 
 
 # ---------------------------------------------------------------------------

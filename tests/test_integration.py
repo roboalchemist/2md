@@ -39,6 +39,8 @@ def model_is_cached(model_id: str) -> bool:
 PARAKEET_MODEL = "mlx-community/parakeet-tdt-0.6b-v3"
 READERLM_MODEL = "mlx-community/jinaai-ReaderLM-v2"
 QWEN_MODEL = "mlx-community/Qwen3.5-4B-MLX-4bit"
+QWEN3_ASR_MODEL = "mlx-community/Qwen3-ASR-1.7B-4bit"
+SORTFORMER_MODEL = "mlx-community/diar_sortformer_4spk-v1-fp32"
 
 
 # ---------------------------------------------------------------------------
@@ -263,3 +265,54 @@ def test_yt2md_transcription():
 
     assert isinstance(output, str), "Transcription output must be a string"
     assert len(output) > 20, "Transcription must produce non-trivial output"
+
+
+# ---------------------------------------------------------------------------
+# Chinese audio — Qwen3-ASR + Sortformer diarization
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_zh_two_speakers_diarize():
+    """Qwen3-ASR + Sortformer diarize a 2-speaker Chinese audio fixture.
+
+    zh_two_speakers.wav is a synthetic ~12.9s clip derived from zh_short.wav
+    (speaker 1 original, speaker 2 pitch-shifted +20%). The output markdown
+    must contain at least two distinct SPEAKER_N labels and CJK characters.
+    """
+    zh_audio = Path(__file__).parent / "audio" / "zh_two_speakers.wav"
+    if not zh_audio.exists():
+        pytest.skip(f"zh_two_speakers.wav not found: {zh_audio}")
+    if not model_is_cached(QWEN3_ASR_MODEL):
+        pytest.skip(f"Qwen3-ASR-1.7B-4bit not cached ({QWEN3_ASR_MODEL}) — download it first")
+    if not model_is_cached(SORTFORMER_MODEL):
+        pytest.skip(f"Sortformer not cached ({SORTFORMER_MODEL}) — download it first")
+
+    from any2md.yt import transcribe
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_path = transcribe(
+            str(zh_audio),
+            QWEN3_ASR_MODEL,
+            output_dir=tmpdir,
+            language="Chinese",
+            diarize_model_name=SORTFORMER_MODEL,
+        )
+        content = Path(output_path).read_text(encoding="utf-8")
+
+    assert content.startswith("---"), "Output must start with YAML frontmatter"
+
+    # Must have at least two distinct speaker labels in the output
+    speaker_labels = set()
+    for line in content.split("\n"):
+        if "SPEAKER_" in line:
+            import re
+            for match in re.finditer(r"SPEAKER_\d+", line):
+                speaker_labels.add(match.group())
+    assert len(speaker_labels) >= 2, (
+        f"Expected >= 2 speaker labels in diarized output, got {speaker_labels}\n"
+        f"Content:\n{content[:500]}"
+    )
+
+    # Must contain CJK characters (confirms Qwen3-ASR transcribed Chinese)
+    has_cjk = any("一" <= ch <= "鿿" for ch in content)
+    assert has_cjk, f"Expected CJK characters in Chinese transcript, got:\n{repr(content[:300])}"

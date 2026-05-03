@@ -1263,6 +1263,172 @@ class TestResolveSpeakersArg(unittest.TestCase):
     pass
 
 
+class TestGetSegments(unittest.TestCase):
+    """Unit tests for _get_segments() — the load-bearing segment extractor.
+
+    _get_segments checks result.sentences first (Parakeet-style), then
+    result.segments (Qwen3-ASR-style), then returns [].  The ordering matters
+    because Parakeet's STTOutput has both attributes; sentences must win.
+    """
+
+    def test_sentences_shape_returns_sentences(self):
+        """When result has non-empty .sentences, _get_segments returns it."""
+        from unittest.mock import MagicMock
+        from any2md.yt import _get_segments
+
+        result = MagicMock()
+        result.sentences = [{"start": 0.0, "end": 1.0, "text": "Hello"}]
+        result.segments = [{"start": 0.0, "end": 1.0, "text": "should not appear"}]
+
+        segs = _get_segments(result)
+        self.assertEqual(len(segs), 1)
+        self.assertEqual(segs[0]["text"], "Hello")
+
+    def test_segments_shape_returned_when_no_sentences(self):
+        """When result.sentences is None/empty, _get_segments falls back to .segments."""
+        from unittest.mock import MagicMock
+        from any2md.yt import _get_segments
+
+        result = MagicMock()
+        result.sentences = None
+        result.segments = [{"start": 0.0, "end": 2.0, "text": "你好"}]
+
+        segs = _get_segments(result)
+        self.assertEqual(len(segs), 1)
+        self.assertEqual(segs[0]["text"], "你好")
+
+    def test_empty_sentences_falls_back_to_segments(self):
+        """Empty list on .sentences falls back to .segments (falsy check)."""
+        from unittest.mock import MagicMock
+        from any2md.yt import _get_segments
+
+        result = MagicMock()
+        result.sentences = []
+        result.segments = [{"start": 0.0, "end": 1.0, "text": "fallback"}]
+
+        segs = _get_segments(result)
+        self.assertEqual(len(segs), 1)
+        self.assertEqual(segs[0]["text"], "fallback")
+
+    def test_neither_attribute_returns_empty_list(self):
+        """When both .sentences and .segments are None, _get_segments returns []."""
+        from unittest.mock import MagicMock
+        from any2md.yt import _get_segments
+
+        result = MagicMock()
+        result.sentences = None
+        result.segments = None
+
+        segs = _get_segments(result)
+        self.assertEqual(segs, [])
+
+    def test_missing_attribute_falls_back_gracefully(self):
+        """When the result object has no .sentences attr, falls back to .segments."""
+        from any2md.yt import _get_segments
+
+        class FakeResult:
+            segments = [{"start": 0.0, "end": 1.0, "text": "only segments"}]
+
+        segs = _get_segments(FakeResult())
+        self.assertEqual(len(segs), 1)
+        self.assertEqual(segs[0]["text"], "only segments")
+
+    def test_both_missing_returns_empty_list(self):
+        """Object with neither attribute returns []."""
+        from any2md.yt import _get_segments
+
+        class BareResult:
+            text = "bare result with no segments"
+
+        segs = _get_segments(BareResult())
+        self.assertEqual(segs, [])
+
+
+class TestDetectLanguage(unittest.TestCase):
+    """Unit tests for _detect_language() internal logic.
+
+    No real audio file or LID model is needed — tests mock the internals
+    to exercise the low-confidence and short-audio early-return paths.
+    """
+
+    def test_short_audio_returns_en_with_zero_confidence(self):
+        """Audio shorter than LID_MIN_AUDIO_DURATION_S returns ('en', 0.0)."""
+        from unittest.mock import patch
+        from any2md.yt import _detect_language, LID_MIN_AUDIO_DURATION_S
+
+        # Patch _audio_duration_s to return a value below the threshold
+        with patch("any2md.yt._audio_duration_s", return_value=LID_MIN_AUDIO_DURATION_S - 0.1):
+            lang, conf = _detect_language("x.wav")
+
+        self.assertEqual(lang, "en")
+        self.assertEqual(conf, 0.0)
+
+    def test_low_confidence_returns_en_with_raw_conf(self):
+        """When top prob < LID_CONFIDENCE_THRESHOLD, return ('en', raw_prob)."""
+        from unittest.mock import patch, MagicMock
+        from any2md.yt import _detect_language, LID_MIN_AUDIO_DURATION_S, LID_CONFIDENCE_THRESHOLD
+
+        fake_mel = MagicMock()
+        fake_mel.astype.return_value = fake_mel  # mel_segment.astype(dtype) returns itself
+
+        fake_model = MagicMock()
+        # _prepare_audio returns (mel, content_frames)
+        fake_model._prepare_audio.return_value = (fake_mel, 1500)
+        fake_model.dtype = "float32"
+        # detect_language returns (token, probs_dict)
+        low_conf = LID_CONFIDENCE_THRESHOLD - 0.1  # e.g. 0.4
+        fake_model.detect_language.return_value = ("zh", {"zh": low_conf, "en": 0.2})
+
+        # pad_or_trim is imported locally inside _detect_language as:
+        #   from mlx_audio.stt.models.whisper.audio import pad_or_trim, N_FRAMES
+        # Patch it at the source module so the local import picks up the mock.
+        with patch("any2md.yt._audio_duration_s", return_value=LID_MIN_AUDIO_DURATION_S + 1.0), \
+             patch("any2md.yt._load_lid_model", return_value=fake_model), \
+             patch("mlx_audio.stt.models.whisper.audio.pad_or_trim",
+                   side_effect=lambda mel, n, axis=-1: mel), \
+             patch("mlx_audio.stt.models.whisper.audio.N_FRAMES", 3000):
+            lang, conf = _detect_language("x.wav")
+
+        self.assertEqual(lang, "en")
+        self.assertAlmostEqual(conf, low_conf, places=5)
+
+    def test_high_confidence_returns_detected_language(self):
+        """When top prob >= LID_CONFIDENCE_THRESHOLD, return the detected lang."""
+        from unittest.mock import patch, MagicMock
+        from any2md.yt import _detect_language, LID_MIN_AUDIO_DURATION_S, LID_CONFIDENCE_THRESHOLD
+
+        fake_mel = MagicMock()
+        fake_mel.astype.return_value = fake_mel
+
+        fake_model = MagicMock()
+        fake_model._prepare_audio.return_value = (fake_mel, 1500)
+        fake_model.dtype = "float32"
+        high_conf = LID_CONFIDENCE_THRESHOLD + 0.3  # e.g. 0.8
+        fake_model.detect_language.return_value = ("zh", {"zh": high_conf, "en": 0.1})
+
+        with patch("any2md.yt._audio_duration_s", return_value=LID_MIN_AUDIO_DURATION_S + 1.0), \
+             patch("any2md.yt._load_lid_model", return_value=fake_model), \
+             patch("mlx_audio.stt.models.whisper.audio.pad_or_trim",
+                   side_effect=lambda mel, n, axis=-1: mel), \
+             patch("mlx_audio.stt.models.whisper.audio.N_FRAMES", 3000):
+            lang, conf = _detect_language("x.wav")
+
+        self.assertEqual(lang, "zh")
+        self.assertAlmostEqual(conf, high_conf, places=5)
+
+    def test_lid_model_none_returns_en(self):
+        """When _load_lid_model() returns None (model not installed), return ('en', 0.0)."""
+        from unittest.mock import patch
+        from any2md.yt import _detect_language, LID_MIN_AUDIO_DURATION_S
+
+        with patch("any2md.yt._audio_duration_s", return_value=LID_MIN_AUDIO_DURATION_S + 1.0), \
+             patch("any2md.yt._load_lid_model", return_value=None):
+            lang, conf = _detect_language("x.wav")
+
+        self.assertEqual(lang, "en")
+        self.assertEqual(conf, 0.0)
+
+
 class TestLanguageDetectionAndRouting(unittest.TestCase):
     """Unit tests for _resolve_language_and_model and related LID helpers.
 
