@@ -54,5 +54,5 @@ mlx_models/
 benchmark-results/
 
 # Except test audio files
-!test_audio/*.mp3
-!test_audio/*.wav .claude/worktrees/
+!tests/audio/*.wav
+!tests/audio/*.mp3
